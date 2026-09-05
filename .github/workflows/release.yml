@@ -1,0 +1,144 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  # So the build matrix can be exercised without cutting a release.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: fx-darwin-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - name: fx-darwin-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+          - name: fx-linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            features: vendored-keychain
+          - name: fx-linux-aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            features: vendored-keychain
+          - name: fx-windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # Building libdbus from source needs a C toolchain and pkg-config; the
+      # result is linked in, so the artifact itself has no D-Bus dependency.
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config
+
+      - name: Build
+        shell: bash
+        run: |
+          cargo build --release --locked \
+            --target ${{ matrix.target }} \
+            -p fx-cli \
+            ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
+
+      - name: Check the binary runs and reports the right version
+        shell: bash
+        # A cross-compiled artifact cannot be executed on the host that built
+        # it, so this is skipped for the one target that is not native.
+        if: matrix.target != 'x86_64-apple-darwin'
+        run: |
+          BIN=target/${{ matrix.target }}/release/fx
+          [ "${{ runner.os }}" = "Windows" ] && BIN="$BIN.exe"
+          "$BIN" --version
+          test "$("$BIN" --version)" = "fx ${GITHUB_REF_NAME#v}" || \
+            echo "note: version is $("$BIN" --version), ref is ${GITHUB_REF_NAME}"
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist staging
+          SRC=target/${{ matrix.target }}/release
+          cp README.md LICENSE CHANGELOG.md staging/
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "$SRC/fx.exe" staging/
+            (cd staging && 7z a -tzip "../dist/${{ matrix.name }}.zip" .)
+          else
+            cp "$SRC/fx" staging/
+            tar -czf "dist/${{ matrix.name }}.tar.gz" -C staging .
+          fi
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      # The release body is the matching section of the changelog, so the two
+      # cannot drift.
+      - name: Extract release notes
+        id: notes
+        run: |
+          python3 - "${GITHUB_REF_NAME#v}" <<'PY' > notes.md
+          import re, sys
+          version = sys.argv[1]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          # Match "## [1.2.3]" up to the next "## " heading.
+          pattern = rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## |\Z)"
+          found = re.search(pattern, text, re.S | re.M)
+          print((found.group(1) if found else "").strip() or
+                f"See CHANGELOG.md for {version}.")
+          PY
+          echo "--- notes.md ---"
+          cat notes.md
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            artifacts/*

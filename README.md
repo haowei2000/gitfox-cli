@@ -33,18 +33,41 @@ Next: `fx-mcp` (v0.7), reusing `gitfox-client` directly.
 
 ## Install
 
+### A prebuilt binary
+
+Download it from [the latest release][releases], make it executable, and put it
+on your `PATH`:
+
+```bash
+# macOS (Apple silicon)
+curl -sSL -o fx.tar.gz https://github.com/haowei2000/gitfox-cli/releases/latest/download/fx-darwin-aarch64.tar.gz
+tar -xzf fx.tar.gz fx && chmod +x fx && sudo mv fx /usr/local/bin/
+fx --version
+```
+
+Built for `darwin-aarch64`, `darwin-x86_64`, `linux-x86_64`, `linux-aarch64`
+and `windows-x86_64`. Every release ships a `SHA256SUMS`; verify with
+`sha256sum -c SHA256SUMS`.
+
+The Linux binaries link libdbus statically, so they run in a minimal container
+with nothing installed.
+
+### From source
+
 ```bash
 cargo install --path crates/fx-cli
 ```
 
-On Linux the OS keychain integration links against D-Bus:
+A source build on Linux links against the system D-Bus for the OS keychain:
 
 ```bash
 sudo apt install -y libdbus-1-dev pkg-config
 ```
 
-CI and agents do not need it — they pass `GITFOX_TOKEN` and never touch the
+CI and agents need none of that — they pass `GITFOX_TOKEN` and never touch the
 keychain.
+
+[releases]: https://github.com/haowei2000/gitfox-cli/releases/latest
 
 ## Quick start
 
@@ -370,8 +393,8 @@ Two rules keep this from rotting:
 | **v0.4** ✅ | `pipeline list/view/logs/run/retry`, including `logs --failed` |
 | **v0.5** ✅ | `pr checkout/diff/checks`, `pr create --fill`, shell completion |
 | **v0.6** ✅ | agent hardening: pagination, retries, non-interactive edges, schema freeze |
-| v0.7 → | `fx-mcp`, reusing `gitfox-client` directly |
-| v1.0 | CLI syntax, JSON schema, config format and exit codes all stable |
+| [v0.7](https://github.com/haowei2000/gitfox-cli/milestone/1) | `fx-mcp`, reusing `gitfox-client` directly |
+| [v1.0](https://github.com/haowei2000/gitfox-cli/milestone/2) | CLI syntax, JSON schema, config format and exit codes all stable; published to crates.io |
 
 The twelve commands v0.1–v0.4 aim to make rock solid: `auth login/logout/status`,
 `api`, `repo list/view`, `pr list/view/create/merge`, `pipeline list/logs`.

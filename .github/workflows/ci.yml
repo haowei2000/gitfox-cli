@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# A new push supersedes the run still queued for the previous commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
