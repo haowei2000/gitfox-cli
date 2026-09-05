@@ -4,12 +4,14 @@
 //! layer means an upstream API change is absorbed by a serde attribute here
 //! instead of leaking into the CLI's stable JSON schema.
 
+mod pipeline;
 mod principal;
 mod pull_request;
 mod repo_ref;
 mod repository;
 mod user;
 
+pub use pipeline::{CiStatus, Execution, LogLine, Pipeline, Stage, Step};
 pub use principal::Principal;
 pub use pull_request::{
     CreatePullRequest, MergeMethod, MergePullRequest, MergeResult, PullRequest, PullRequestState,

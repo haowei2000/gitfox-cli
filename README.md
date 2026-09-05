@@ -23,13 +23,14 @@ machine never has to parse prose:
 
 ## Status
 
-**v0.3 — pull requests work.** `fx pr list|view|create|merge` are implemented
-against a verified GitFox API v1.3.0, on top of the v0.1 foundation
-(configuration chain, client, `fx api`, `fx auth`, `fx config`, output system,
-error and exit-code contract) and git remote detection pulled forward from v0.2.
+**v0.4 — pull requests and CI work.** `fx pr list|view|create|merge` and
+`fx pipeline list|view|logs|run|retry` are implemented against a verified GitFox
+API v1.3.0, on top of the v0.1 foundation (configuration chain, client,
+`fx api`, `fx auth`, `fx config`, output system, error and exit-code contract)
+and git remote detection pulled forward from v0.2.
 
-Still on the roadmap: `fx repo list|view|clone` (v0.2), `fx pipeline` (v0.4),
-and `fx pr checkout|diff|checks` (v0.5). Each returns a structured
+Still on the roadmap: `fx repo list|view|clone` (v0.2) and
+`fx pr checkout|diff|checks` (v0.5). Each returns a structured
 `NOT_IMPLEMENTED` error naming its version, and `fx api` reaches every endpoint
 in the meantime.
 
@@ -97,6 +98,39 @@ Two flags worth knowing:
   the question an agent actually wants before it does anything.
 * `fx pr list --author whw` takes a login. GitFox filters by numeric principal
   id, so fx resolves the name for you.
+
+## CI
+
+```bash
+fx pipeline list            # every pipeline's latest run, one request
+fx pipeline view            # the newest run, with its stage/step tree
+fx pipeline logs --failed   # only the steps that failed
+fx pipeline retry           # run it again
+```
+
+```
+RUN   PIPELINE  STATUS      BRANCH      MESSAGE          STARTED
+#182  default   ✗ failure   main        feat: add OAuth  12m ago
+#181  nightly   ✓ success   main        chore: bump      6h ago
+```
+
+`--failed` is the reason this exists. GitFox addresses logs per *step*, and only
+the single-execution endpoint returns the stage tree, so answering "why is CI
+red" by hand is: read the run, find the failed steps, fetch each one. Here:
+
+```bash
+fx --agent pipeline logs --failed
+```
+
+```json
+{ "ok": true, "data": { "run": 182, "status": "failure", "count": 1,
+  "steps": [ { "stage": "build", "step": "cargo test", "exit_code": 101,
+               "lines": ["error[E0308]: mismatched types", "..."] } ] } }
+```
+
+Inside a checkout with one pipeline, nothing needs naming: the pipeline is
+inferred, and the run defaults to the most recent. A green run answers with an
+empty `steps` and exit 0 — "nothing failed" is a result, not an error.
 
 ## `fx api` — the escape hatch
 
@@ -247,7 +281,7 @@ Two rules keep this from rotting:
 | **v0.1** ✅ | workspace, client, config chain, env vars, auth, `fx api`, JSON output, error model |
 | v0.2 ◐ | git remote detection and `-R` ✅; `repo list/view/clone` still to come |
 | **v0.3** ✅ | `pr list/view/create/merge` — the first genuinely daily-usable release |
-| v0.4 | `pipeline list/view/logs/retry`, including `logs --failed` |
+| **v0.4** ✅ | `pipeline list/view/logs/run/retry`, including `logs --failed` |
 | v0.5 | `pr checkout/diff/checks`, `pr create --fill`, shell completion, nicer tables |
 | v0.6 | agent hardening: pagination, retries, non-interactive edges, schema freeze |
 | v0.7 | `fx-mcp`, reusing `gitfox-client` directly |
@@ -255,7 +289,7 @@ Two rules keep this from rotting:
 
 The twelve commands v0.1–v0.4 aim to make rock solid: `auth login/logout/status`,
 `api`, `repo list/view`, `pr list/view/create/merge`, `pipeline list/logs`.
-Nine are done.
+Eleven are done; `repo list` and `repo view` remain.
 
 ### Where the endpoints come from
 

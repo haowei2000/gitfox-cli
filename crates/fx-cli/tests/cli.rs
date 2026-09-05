@@ -137,11 +137,7 @@ fn commands_still_on_the_roadmap_say_so_in_a_structured_way() {
     for (args, command, version) in [
         (vec!["--agent", "repo", "list"], "fx repo list", "v0.2"),
         (vec!["--agent", "pr", "diff"], "fx pr diff", "v0.5"),
-        (
-            vec!["--agent", "pipeline", "list"],
-            "fx pipeline list",
-            "v0.4",
-        ),
+        (vec!["--agent", "pr", "checks"], "fx pr checks", "v0.5"),
     ] {
         let output = fx(home.path()).args(&args).output().unwrap();
         assert_eq!(code(&output), 9, "for {args:?}");
@@ -960,4 +956,356 @@ async fn a_404_on_the_repository_path_names_the_repository_not_a_pull_request() 
         error["message"].as_str().unwrap().contains("ai/backend"),
         "{error}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// fx pipeline
+// ---------------------------------------------------------------------------
+
+const PIPE_PATH: &str = "/api/v1/repos/ai%2Fbackend/pipelines";
+
+/// A run with one failed step, one that passed, and one that never ran.
+fn failing_execution() -> Value {
+    json!({
+        "number": 182,
+        "status": "failure",
+        "message": "feat: add OAuth",
+        "target": "main",
+        "author_login": "whw",
+        "event": "push",
+        "started": 1_756_000_000_000i64,
+        "stages": [{
+            "number": 1, "name": "build", "status": "failure",
+            "steps": [
+                { "number": 1, "name": "clone", "status": "success" },
+                { "number": 2, "name": "cargo test", "status": "failure", "exit_code": 101 },
+                { "number": 3, "name": "cargo clippy", "status": "skipped" }
+            ]
+        }]
+    })
+}
+
+fn pipeline_env(home: &Path, uri: &str) -> Command {
+    let mut cmd = fx(home);
+    cmd.env("GITFOX_HOST", uri)
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend");
+    cmd
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pipeline_list_shows_each_pipelines_latest_run_in_one_request() {
+    let server = MockServer::start().await;
+    // ?latest=true embeds the most recent execution per pipeline.
+    Mock::given(method("GET"))
+        .and(path(PIPE_PATH))
+        .and(query_param("latest", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "identifier": "default", "execution": failing_execution() },
+            { "identifier": "nightly", "execution": null }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = pipeline_env(home.path(), &server.uri())
+        .args(["--agent", "pipeline", "list"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let data = &stdout_json(&output)["data"];
+    // The pipeline that has never run contributes no row.
+    assert_eq!(data["count"], 1);
+    assert_eq!(data["items"][0]["pipeline"], "default");
+    assert_eq!(data["items"][0]["number"], 182);
+    assert_eq!(data["items"][0]["branch"], "main");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pipeline_list_for_one_pipeline_uses_the_executions_endpoint() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PIPE_PATH}/default/executions")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([failing_execution()])))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = pipeline_env(home.path(), &server.uri())
+        .args(["--agent", "pipeline", "list", "--pipeline", "default"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    // Same schema as the unfiltered form.
+    let data = &stdout_json(&output)["data"];
+    assert_eq!(data["items"][0]["pipeline"], "default");
+    assert_eq!(data["items"][0]["status"], "failure");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logs_failed_fetches_only_the_failed_step() {
+    let server = MockServer::start().await;
+    // The pipeline is inferred: the repository has exactly one.
+    Mock::given(method("GET"))
+        .and(path(PIPE_PATH))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!([{ "identifier": "default" }])),
+        )
+        .mount(&server)
+        .await;
+    // The run number is inferred: the most recent one.
+    Mock::given(method("GET"))
+        .and(path(format!("{PIPE_PATH}/default/executions")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([failing_execution()])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PIPE_PATH}/default/executions/182")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(failing_execution()))
+        .mount(&server)
+        .await;
+    // Only stage 1 / step 2 — the one that failed — may be asked for.
+    Mock::given(method("GET"))
+        .and(path(format!("{PIPE_PATH}/default/executions/182/logs/1/2")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "pos": 0, "out": "error[E0308]: mismatched types\n", "time": 1 },
+            { "pos": 1, "out": "error: aborting due to 1 previous error", "time": 2 }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = pipeline_env(home.path(), &server.uri())
+        .args(["--agent", "pipeline", "logs", "--failed"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let data = &stdout_json(&output)["data"];
+    assert_eq!(data["run"], 182);
+    assert_eq!(data["only_failed"], true);
+    assert_eq!(data["count"], 1);
+    let step = &data["steps"][0];
+    assert_eq!(step["stage"], "build");
+    assert_eq!(step["step"], "cargo test");
+    assert_eq!(step["exit_code"], 101);
+    assert_eq!(step["lines"][0], "error[E0308]: mismatched types");
+    assert_eq!(step["lines"][1], "error: aborting due to 1 previous error");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logs_for_a_green_run_says_so_and_still_succeeds() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PIPE_PATH}/default/executions/9")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "number": 9, "status": "success",
+            "stages": [{ "number": 1, "name": "build", "status": "success",
+                "steps": [{ "number": 1, "name": "cargo test", "status": "success" }] }]
+        })))
+        .mount(&server)
+        .await;
+    // No log endpoint is mounted: asking for one would fail the test.
+
+    let home = TempDir::new().unwrap();
+    let output = pipeline_env(home.path(), &server.uri())
+        .args(["pipeline", "logs", "9", "--pipeline", "default", "--failed"])
+        .output()
+        .unwrap();
+
+    assert_eq!(code(&output), 0);
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("No failed steps"), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn several_pipelines_refuse_to_guess_and_name_the_choices() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(PIPE_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "identifier": "default" },
+            { "identifier": "nightly" }
+        ])))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = pipeline_env(home.path(), &server.uri())
+        .args(["--agent", "pipeline", "logs", "--failed"])
+        .output()
+        .unwrap();
+
+    assert_eq!(code(&output), 2);
+    let error = &stdout_json(&output)["error"];
+    assert_eq!(error["code"], "INVALID_ARGUMENT");
+    assert!(
+        error["message"].as_str().unwrap().contains("2 pipelines"),
+        "{error}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repository_with_no_pipelines_is_reported_as_such() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(PIPE_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = pipeline_env(home.path(), &server.uri())
+        .args(["--agent", "pipeline", "view"])
+        .output()
+        .unwrap();
+
+    assert_eq!(code(&output), 4);
+    assert_eq!(stdout_json(&output)["error"]["code"], "PIPELINE_NOT_FOUND");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pipeline_view_returns_the_stage_tree() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PIPE_PATH}/default/executions/182")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(failing_execution()))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = pipeline_env(home.path(), &server.uri())
+        .args([
+            "--agent",
+            "pipeline",
+            "view",
+            "182",
+            "--pipeline",
+            "default",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let data = &stdout_json(&output)["data"];
+    assert_eq!(data["stages"][0]["name"], "build");
+    assert_eq!(data["stages"][0]["steps"][1]["status"], "failure");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pipeline_retry_and_run_start_a_new_execution() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("{PIPE_PATH}/default/executions/182/retry")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "number": 183, "status": "pending" })),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("{PIPE_PATH}/default/executions")))
+        .and(query_param("branch", "main"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "number": 184, "status": "pending" })),
+        )
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let retried = pipeline_env(home.path(), &server.uri())
+        .args([
+            "--agent",
+            "pipeline",
+            "retry",
+            "182",
+            "--pipeline",
+            "default",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        code(&retried),
+        0,
+        "{}",
+        String::from_utf8_lossy(&retried.stdout)
+    );
+    assert_eq!(stdout_json(&retried)["data"]["number"], 183);
+
+    let started = pipeline_env(home.path(), &server.uri())
+        .args(["--agent", "pipeline", "run", "default", "-b", "main"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        code(&started),
+        0,
+        "{}",
+        String::from_utf8_lossy(&started.stdout)
+    );
+    assert_eq!(stdout_json(&started)["data"]["number"], 184);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_step_whose_log_is_not_ready_yet_does_not_fail_the_command() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PIPE_PATH}/default/executions/182")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(failing_execution()))
+        .mount(&server)
+        .await;
+    // The step exists in the tree but its log is gone.
+    Mock::given(method("GET"))
+        .and(path(format!("{PIPE_PATH}/default/executions/182/logs/1/2")))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" })))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = pipeline_env(home.path(), &server.uri())
+        .args([
+            "--agent",
+            "pipeline",
+            "logs",
+            "182",
+            "--pipeline",
+            "default",
+            "--failed",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let step = &stdout_json(&output)["data"]["steps"][0];
+    assert_eq!(step["step"], "cargo test");
+    // Still reported, with the status and exit code, just without output.
+    assert_eq!(step["exit_code"], 101);
+    assert_eq!(step["lines"].as_array().unwrap().len(), 0);
 }

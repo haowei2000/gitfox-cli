@@ -32,7 +32,8 @@ pub use client::{
 };
 pub use error::{Error, Result};
 pub use models::{
-    CreatePullRequest, MergeMethod, MergePullRequest, MergeResult, Principal, PullRequest,
-    PullRequestState, PullRequestStats, RepoRef, Repository, User,
+    CiStatus, CreatePullRequest, Execution, LogLine, MergeMethod, MergePullRequest, MergeResult,
+    Pipeline, Principal, PullRequest, PullRequestState, PullRequestStats, RepoRef, Repository,
+    Stage, Step, User,
 };
 pub use pull_request::PullRequestFilter;

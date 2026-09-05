@@ -18,7 +18,7 @@ pub async fn dispatch(command: Command, ctx: &Context) -> Result<()> {
         Command::Api(args) => api::run(args, ctx).await,
         Command::Repo(cmd) => repo::run(cmd, ctx),
         Command::Pr(cmd) => pr::run(cmd, ctx).await,
-        Command::Pipeline(cmd) => pipeline::run(cmd, ctx),
+        Command::Pipeline(cmd) => pipeline::run(cmd, ctx).await,
         Command::Config(cmd) => config::run(cmd, ctx),
     }
 }

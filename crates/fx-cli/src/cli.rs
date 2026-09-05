@@ -439,6 +439,15 @@ pub enum PipelineSubcommand {
     /// Show a pipeline run
     View(PipelineRefArgs),
     /// Print the logs of a pipeline run
+    #[command(long_about = "\
+Print the logs of a pipeline run.
+
+Logs are addressed per step, so this walks the run and fetches the steps you
+asked for. Inside a checkout with a single pipeline, none of it needs naming:
+
+  fx pipeline logs --failed      the failed steps of the most recent run
+  fx pipeline logs 182 --failed  the failed steps of run 182
+  fx pipeline logs --step test   steps whose name contains \"test\"")]
     Logs(PipelineLogsArgs),
     /// Trigger a pipeline run
     Run(PipelineRunArgs),
@@ -459,22 +468,22 @@ pub struct PipelineListArgs {
 
 #[derive(Debug, Args)]
 pub struct PipelineRefArgs {
-    /// Run number
+    /// Run number; defaults to the most recent run
     #[arg(value_name = "RUN")]
-    pub run: u64,
+    pub run: Option<u64>,
 
-    /// Pipeline the run belongs to
+    /// Pipeline the run belongs to; inferred when the repository has only one
     #[arg(long, value_name = "PIPELINE")]
     pub pipeline: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct PipelineLogsArgs {
-    /// Run number
+    /// Run number; defaults to the most recent run
     #[arg(value_name = "RUN")]
-    pub run: u64,
+    pub run: Option<u64>,
 
-    /// Pipeline the run belongs to
+    /// Pipeline the run belongs to; inferred when the repository has only one
     #[arg(long, value_name = "PIPELINE")]
     pub pipeline: Option<String>,
 
@@ -482,7 +491,7 @@ pub struct PipelineLogsArgs {
     #[arg(long)]
     pub failed: bool,
 
-    /// Only this step
+    /// Only steps whose name contains this
     #[arg(long, value_name = "STEP")]
     pub step: Option<String>,
 }

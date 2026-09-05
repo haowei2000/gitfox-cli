@@ -8,6 +8,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+* `fx pipeline list | view | logs | run | retry`, against endpoints verified
+  from the instance's own `/openapi.yaml` (GitFox API v1.3.0).
+  * `fx pipeline logs --failed` reads the run, walks its stages for steps that
+    failed, and fetches only those. `--step` filters by name and composes with
+    `--failed`. A green run answers with an empty list and exit 0.
+  * `fx pipeline list` costs one request: `?latest=true` embeds each pipeline's
+    most recent run. With `--pipeline` it lists that pipeline's runs instead,
+    in the same shape.
+  * The pipeline is inferred when a repository has only one, and the run
+    number defaults to the most recent. Several pipelines refuse to guess and
+    name the choices.
+  * A step whose log is missing is still reported, with its status and exit
+    code, rather than failing the command.
+* `CiStatus` keeps the server's exact word rather than mapping onto a closed
+  enum, so a status GitFox adds later neither fails to decode nor loses
+  information on the way out.
+
 * `fx pr list | view | create | merge`, against endpoints verified from the
   instance's own `/openapi.yaml` (GitFox API v1.3.0).
   * `fx pr view` and `fx pr merge` take no number inside a checkout: the current

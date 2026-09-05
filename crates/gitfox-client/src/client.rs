@@ -12,6 +12,7 @@ use url::form_urlencoded;
 
 use crate::auth::AuthApi;
 use crate::error::{Error, Result};
+use crate::pipeline::PipelinesApi;
 use crate::principal::PrincipalsApi;
 use crate::pull_request::PullRequestsApi;
 use crate::repo::ReposApi;
@@ -75,6 +76,10 @@ impl GitFoxClient {
 
     pub fn principals(&self) -> PrincipalsApi<'_> {
         PrincipalsApi::new(self)
+    }
+
+    pub fn pipelines(&self) -> PipelinesApi<'_> {
+        PipelinesApi::new(self)
     }
 
     /// Resolve an API path against the host.
