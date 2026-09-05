@@ -8,9 +8,10 @@ use serde_json::{Value, json};
 
 pub type Result<T> = std::result::Result<T, CliError>;
 
-// Every variant is part of the published contract (`docs/exit-codes.md`), so
-// the table stays complete even while the commands that raise some of them
-// are still on the roadmap.
+// Every variant is part of the published contract (`docs/exit-codes.md`).
+// `NotImplemented` currently has no caller — every command in the surface is
+// wired up — but it stays: removing a documented code would break a consumer
+// that switches on the full set, and the next roadmap command will want it.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCode {
@@ -104,21 +105,6 @@ impl CliError {
 
     pub fn invalid_argument(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::InvalidArgument, message)
-    }
-
-    /// A command that exists in the CLI surface but is not wired up yet.
-    ///
-    /// Deliberately a first-class, structured error: an agent that hits one
-    /// learns the exact target version instead of guessing from a help text.
-    pub fn not_implemented(command: &str, version: &str) -> Self {
-        Self::new(
-            ErrorCode::NotImplemented,
-            format!("`{command}` is not implemented yet (planned for {version})"),
-        )
-        .with_details(json!({ "command": command, "planned_version": version }))
-        .with_hint(format!(
-            "use `fx api` in the meantime, e.g. `fx api GET /api/v1/user`; see the roadmap in README.md for {version}"
-        ))
     }
 
     pub fn exit_code(&self) -> i32 {

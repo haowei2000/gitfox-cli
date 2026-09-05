@@ -37,7 +37,7 @@ new codes may be added, existing ones are never renumbered or renamed.
 | `RATE_LIMITED` | 6 | the server answered 429; `details.retry_after_secs` when it said |
 | `CONFIG_ERROR` | 7 | missing host, unreadable config, bad environment value |
 | `GIT_CONTEXT_ERROR` | 8 | the current directory is not a usable GitFox checkout |
-| `NOT_IMPLEMENTED` | 9 | the command is on the roadmap; `details.planned_version` says when |
+| `NOT_IMPLEMENTED` | 9 | reserved; no command raises it today |
 | `UNEXPECTED` | 1 | a bug in fx |
 
 ## Using them

@@ -6,12 +6,14 @@
 //! reach for and one you look up the syntax for each time.
 
 use gitfox_client::{
-    CreatePullRequest, GitFoxClient, MergePullRequest, MergeResult, PullRequest, PullRequestFilter,
-    RepoRef,
+    CreatePullRequest, FileDiff, GitFoxClient, MergePullRequest, MergeResult, PullRequest,
+    PullRequestChecks, PullRequestFilter, RepoRef,
 };
 use serde_json::{Value, json};
 
-use crate::cli::{PrCommand, PrCreateArgs, PrListArgs, PrMergeArgs, PrNumberArgs, PrSubcommand};
+use crate::cli::{
+    PrCommand, PrCreateArgs, PrDiffArgs, PrListArgs, PrMergeArgs, PrNumberArgs, PrSubcommand,
+};
 use crate::context::Context;
 use crate::error::{CliError, ErrorCode, Result};
 use crate::git;
@@ -24,9 +26,9 @@ pub async fn run(cmd: PrCommand, ctx: &Context) -> Result<()> {
         PrSubcommand::View(args) => view(args, ctx).await,
         PrSubcommand::Create(args) => create(args, ctx).await,
         PrSubcommand::Merge(args) => merge(args, ctx).await,
-        PrSubcommand::Checkout(_) => Err(CliError::not_implemented("fx pr checkout", "v0.5")),
-        PrSubcommand::Diff(_) => Err(CliError::not_implemented("fx pr diff", "v0.5")),
-        PrSubcommand::Checks(_) => Err(CliError::not_implemented("fx pr checks", "v0.5")),
+        PrSubcommand::Checkout(args) => checkout(args, ctx).await,
+        PrSubcommand::Diff(args) => diff(args, ctx).await,
+        PrSubcommand::Checks(args) => checks(args, ctx).await,
     }
 }
 
@@ -294,6 +296,128 @@ async fn merge(args: PrMergeArgs, ctx: &Context) -> Result<()> {
             result,
         })
         .map_err(unexpected)
+}
+
+// ---------------------------------------------------------------------------
+// diff
+// ---------------------------------------------------------------------------
+
+async fn diff(args: PrDiffArgs, ctx: &Context) -> Result<()> {
+    let repo = ctx.repo()?;
+    let client = ctx.client()?;
+    let pr = resolve_pull_request(args.number, &repo, &client, ctx).await?;
+
+    // The endpoint serves either form. A person wants the patch their pager and
+    // syntax highlighter understand; a machine wants it split by file. Asking
+    // for the one that suits the output mode beats reassembling either.
+    let raw = if ctx.config.output.is_machine() || args.name_only {
+        None
+    } else {
+        Some(client.pull_requests().diff_text(&repo, pr.number).await?)
+    };
+    let files = match &raw {
+        Some(_) => Vec::new(),
+        None => client.pull_requests().diff_files(&repo, pr.number).await?,
+    };
+
+    ctx.renderer
+        .emit(&PullRequestDiff {
+            number: pr.number,
+            source_branch: pr.source_branch.clone(),
+            target_branch: pr.target_branch.clone(),
+            name_only: args.name_only,
+            raw,
+            files,
+        })
+        .map_err(unexpected)
+}
+
+// ---------------------------------------------------------------------------
+// checks
+// ---------------------------------------------------------------------------
+
+async fn checks(args: PrNumberArgs, ctx: &Context) -> Result<()> {
+    let repo = ctx.repo()?;
+    let client = ctx.client()?;
+    let pr = resolve_pull_request(args.number, &repo, &client, ctx).await?;
+    let checks = client.pull_requests().checks(&repo, pr.number).await?;
+
+    ctx.renderer
+        .emit(&PullRequestChecksView {
+            number: pr.number,
+            checks,
+        })
+        .map_err(unexpected)
+}
+
+// ---------------------------------------------------------------------------
+// checkout
+// ---------------------------------------------------------------------------
+
+async fn checkout(args: PrNumberArgs, ctx: &Context) -> Result<()> {
+    let repo = ctx.repo()?;
+    let client = ctx.client()?;
+    let pr = resolve_pull_request(args.number, &repo, &client, ctx).await?;
+
+    // A fork's branch does not live on this remote, and guessing at where it
+    // does would be worse than saying so.
+    if let (Some(source), Some(target)) = (pr.source_repo_id, pr.target_repo_id)
+        && source != target
+    {
+        return Err(CliError::new(
+            ErrorCode::GitContextError,
+            format!(
+                "#{} comes from a fork, which fx cannot check out yet",
+                pr.number
+            ),
+        )
+        .with_hint("add the fork as a remote and check the branch out with git"));
+    }
+
+    let remote = git::remote_name().ok_or_else(|| {
+        CliError::new(
+            ErrorCode::GitContextError,
+            "no git remote to fetch from, or not inside a git repository",
+        )
+    })?;
+    let branch = pr.source_branch.clone();
+    if branch.is_empty() {
+        return Err(CliError::new(
+            ErrorCode::ApiError,
+            format!("#{} reports no source branch", pr.number),
+        ));
+    }
+
+    git::fetch(&remote, &branch).map_err(git_failed)?;
+
+    let existed = git::local_branch_exists(&branch);
+    if existed {
+        git::checkout(&branch).map_err(git_failed)?;
+        // Fast-forward only: a diverged local branch is the user's to resolve.
+        git::merge_ff_only("FETCH_HEAD").map_err(|message| {
+            git_failed(message).with_hint(format!(
+                "`{branch}` has diverged from {remote}; reconcile it yourself"
+            ))
+        })?;
+    } else {
+        git::checkout_new(&branch, "FETCH_HEAD").map_err(git_failed)?;
+        // Best effort: some remotes have no tracking ref for a fresh branch.
+        let _ = git::set_upstream(&branch, &remote);
+    }
+
+    ctx.renderer
+        .emit(&PullRequestCheckedOut {
+            number: pr.number,
+            title: pr.title.clone(),
+            branch,
+            remote,
+            existed,
+        })
+        .map_err(unexpected)
+}
+
+fn git_failed(message: String) -> CliError {
+    CliError::new(ErrorCode::GitContextError, message)
 }
 
 fn unexpected(err: std::io::Error) -> CliError {
@@ -652,5 +776,309 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("deleted branch feat/oauth"), "{text}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v0.5 rendering
+// ---------------------------------------------------------------------------
+
+struct PullRequestDiff {
+    number: u64,
+    source_branch: String,
+    target_branch: String,
+    name_only: bool,
+    /// The raw unified diff, when that is what was fetched.
+    raw: Option<String>,
+    files: Vec<FileDiff>,
+}
+
+impl Render for PullRequestDiff {
+    fn to_json(&self) -> Value {
+        json!({
+            "number": self.number,
+            "source_branch": self.source_branch,
+            "target_branch": self.target_branch,
+            "count": self.files.len(),
+            "files": self.files.iter().map(|f| json!({
+                "path": f.path,
+                "old_path": f.old_path,
+                "status": f.status,
+                "additions": f.additions,
+                "deletions": f.deletions,
+                "changes": f.changes,
+                "is_binary": f.is_binary,
+                "is_submodule": f.is_submodule,
+                // Omitted wholesale under --name-only, which is the point of it.
+                "patch": if self.name_only { None } else { f.patch.clone() },
+            })).collect::<Vec<_>>(),
+        })
+    }
+
+    fn to_jsonl(&self) -> Vec<Value> {
+        self.to_json()["files"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn to_human(&self, _color: bool) -> String {
+        // Handed over verbatim so a pager or a highlighter sees a real diff.
+        if let Some(raw) = &self.raw {
+            return raw.trim_end().to_string();
+        }
+        if self.files.is_empty() {
+            return format!("#{} changes nothing", self.number);
+        }
+        let rows: Vec<Vec<String>> = self
+            .files
+            .iter()
+            .map(|f| {
+                vec![
+                    f.status.clone().unwrap_or_default(),
+                    format!("+{}", f.additions.unwrap_or(0)),
+                    format!("-{}", f.deletions.unwrap_or(0)),
+                    f.path.clone(),
+                ]
+            })
+            .collect();
+        plain_table(&["status", "added", "removed", "path"], &rows)
+    }
+}
+
+struct PullRequestChecksView {
+    number: u64,
+    checks: PullRequestChecks,
+}
+
+impl Render for PullRequestChecksView {
+    fn to_json(&self) -> Value {
+        json!({
+            "number": self.number,
+            "commit_sha": self.checks.commit_sha,
+            "count": self.checks.checks.len(),
+            "failed": self.checks.any_failed(),
+            "blocking": self.checks.required_blocking().len(),
+            "checks": self.checks.checks.iter().map(|c| json!({
+                "name": c.check.identifier,
+                "status": c.check.status.as_str(),
+                "required": c.required.unwrap_or(false),
+                "bypassable": c.bypassable.unwrap_or(false),
+                "summary": c.check.summary,
+                "link": c.check.link,
+                "started": c.check.started,
+                "ended": c.check.ended,
+            })).collect::<Vec<_>>(),
+        })
+    }
+
+    fn to_jsonl(&self) -> Vec<Value> {
+        self.to_json()["checks"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn to_human(&self, color: bool) -> String {
+        if self.checks.checks.is_empty() {
+            return format!("No checks reported for #{}", self.number);
+        }
+        let rows: Vec<Vec<String>> = self
+            .checks
+            .checks
+            .iter()
+            .map(|c| {
+                let status = c.check.status.as_str();
+                let painted = if color {
+                    let colour = match status {
+                        "success" => "\x1b[32m",
+                        "failure" | "error" => "\x1b[31m",
+                        _ => "\x1b[33m",
+                    };
+                    format!("{colour}{status}\x1b[0m")
+                } else {
+                    status.to_string()
+                };
+                vec![
+                    c.check.identifier.clone(),
+                    painted,
+                    if c.required.unwrap_or(false) {
+                        "required"
+                    } else {
+                        ""
+                    }
+                    .to_string(),
+                    c.check.summary.clone().unwrap_or_default(),
+                ]
+            })
+            .collect();
+
+        let mut out = plain_table(&["check", "status", "", "summary"], &rows);
+        let blocking = self.checks.required_blocking();
+        if !blocking.is_empty() {
+            out.push_str(&format!(
+                "\n\n{} required check{} not passing.",
+                blocking.len(),
+                if blocking.len() == 1 { " is" } else { "s are" }
+            ));
+        }
+        out
+    }
+}
+
+struct PullRequestCheckedOut {
+    number: u64,
+    title: String,
+    branch: String,
+    remote: String,
+    existed: bool,
+}
+
+impl Render for PullRequestCheckedOut {
+    fn to_json(&self) -> Value {
+        json!({
+            "number": self.number,
+            "title": self.title,
+            "branch": self.branch,
+            "remote": self.remote,
+            "created_branch": !self.existed,
+        })
+    }
+
+    fn to_human(&self, color: bool) -> String {
+        let (green, reset) = if color {
+            ("\x1b[32m", "\x1b[0m")
+        } else {
+            ("", "")
+        };
+        let verb = if self.existed { "Updated" } else { "Created" };
+        format!(
+            "{green}✓{reset} {verb} branch {} for #{}\n  {}",
+            self.branch, self.number, self.title
+        )
+    }
+}
+
+#[cfg(test)]
+mod v05_tests {
+    use super::*;
+
+    #[test]
+    fn name_only_drops_the_patches_from_the_json() {
+        let files = vec![FileDiff {
+            path: "src/main.rs".into(),
+            additions: Some(10),
+            deletions: Some(2),
+            patch: Some("@@ -1 +1 @@".into()),
+            ..Default::default()
+        }];
+        let with_patch = PullRequestDiff {
+            number: 12,
+            source_branch: "feat/x".into(),
+            target_branch: "main".into(),
+            name_only: false,
+            raw: None,
+            files: files.clone(),
+        };
+        assert_eq!(with_patch.to_json()["files"][0]["patch"], "@@ -1 +1 @@");
+
+        let without = PullRequestDiff {
+            name_only: true,
+            files,
+            ..with_patch
+        };
+        assert!(without.to_json()["files"][0]["patch"].is_null());
+    }
+
+    #[test]
+    fn a_raw_diff_is_handed_over_untouched() {
+        let diff = PullRequestDiff {
+            number: 12,
+            source_branch: "feat/x".into(),
+            target_branch: "main".into(),
+            name_only: false,
+            raw: Some("diff --git a/x b/x\n@@ -1 +1 @@\n-a\n+b\n".into()),
+            files: vec![],
+        };
+        let text = diff.to_human(false);
+        assert!(text.starts_with("diff --git"), "{text}");
+        assert!(
+            text.ends_with("+b"),
+            "trailing blank lines trimmed: {text:?}"
+        );
+    }
+
+    fn check(name: &str, status: &str, required: bool) -> gitfox_client::PullRequestCheck {
+        serde_json::from_value(json!({
+            "required": required,
+            "check": { "identifier": name, "status": status, "summary": "…" }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn checks_report_what_blocks_a_merge() {
+        let view = PullRequestChecksView {
+            number: 12,
+            checks: PullRequestChecks {
+                commit_sha: Some("abc".into()),
+                checks: vec![
+                    check("build", "success", true),
+                    check("lint", "failure", true),
+                    check("optional-audit", "failure", false),
+                ],
+            },
+        };
+        let value = view.to_json();
+        assert_eq!(value["count"], 3);
+        assert_eq!(value["failed"], true);
+        // Only the required, non-green ones block.
+        assert_eq!(value["blocking"], 1);
+        assert_eq!(value["checks"][1]["required"], true);
+        assert!(
+            view.to_human(false)
+                .contains("1 required check is not passing")
+        );
+    }
+
+    #[test]
+    fn a_required_check_still_running_counts_as_blocking() {
+        let checks = PullRequestChecks {
+            commit_sha: None,
+            checks: vec![check("build", "running", true)],
+        };
+        // "Can this merge?" is no — not yet.
+        assert_eq!(checks.required_blocking().len(), 1);
+        assert!(!checks.any_failed());
+    }
+
+    #[test]
+    fn no_checks_is_a_sentence_not_an_empty_table() {
+        let view = PullRequestChecksView {
+            number: 12,
+            checks: PullRequestChecks::default(),
+        };
+        assert!(view.to_human(false).contains("No checks"));
+        assert_eq!(view.to_json()["count"], 0);
+    }
+
+    #[test]
+    fn checkout_says_whether_the_branch_was_new() {
+        let created = PullRequestCheckedOut {
+            number: 12,
+            title: "feat: add OAuth".into(),
+            branch: "feat/oauth".into(),
+            remote: "origin".into(),
+            existed: false,
+        };
+        assert_eq!(created.to_json()["created_branch"], true);
+        assert!(created.to_human(false).starts_with("✓ Created branch"));
+
+        let updated = PullRequestCheckedOut {
+            existed: true,
+            ..created
+        };
+        assert_eq!(updated.to_json()["created_branch"], false);
+        assert!(updated.to_human(false).starts_with("✓ Updated branch"));
     }
 }

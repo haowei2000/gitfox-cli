@@ -110,6 +110,11 @@ pub struct PullRequest {
     pub source_branch: String,
     #[serde(default)]
     pub target_branch: String,
+    /// Differs from `target_repo_id` when the pull request comes from a fork.
+    #[serde(default)]
+    pub source_repo_id: Option<i64>,
+    #[serde(default)]
+    pub target_repo_id: Option<i64>,
     #[serde(default)]
     pub created: Option<i64>,
     #[serde(default)]
@@ -246,5 +251,94 @@ mod tests {
         })
         .unwrap();
         assert_eq!(body, serde_json::json!({ "method": "squash" }));
+    }
+}
+
+/// One file's worth of a pull request diff.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FileDiff {
+    #[serde(default)]
+    pub path: String,
+    /// Set when the file was renamed or copied.
+    #[serde(default)]
+    pub old_path: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub additions: Option<i64>,
+    #[serde(default)]
+    pub deletions: Option<i64>,
+    #[serde(default)]
+    pub changes: Option<i64>,
+    #[serde(default)]
+    pub is_binary: Option<bool>,
+    #[serde(default)]
+    pub is_submodule: Option<bool>,
+    /// The unified diff for this file. Absent for binaries and submodules.
+    #[serde(default)]
+    pub patch: Option<String>,
+    #[serde(default)]
+    pub sha: Option<String>,
+    #[serde(default)]
+    pub old_sha: Option<String>,
+}
+
+/// A status check reported against a pull request's head commit.
+///
+/// Reuses [`crate::CiStatus`] — a check status is a CI status, and the same
+/// open-set reasoning applies: GitFox lists `error`, `failure`, `pending`,
+/// `running` and `success` today, and this keeps whichever word arrives.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Check {
+    #[serde(default)]
+    pub identifier: String,
+    #[serde(default)]
+    pub status: crate::CiStatus,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub link: Option<String>,
+    #[serde(default)]
+    pub started: Option<i64>,
+    #[serde(default)]
+    pub ended: Option<i64>,
+    #[serde(default)]
+    pub reported_by: Option<super::Principal>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PullRequestCheck {
+    /// Whether a merge is blocked while this check is not green.
+    #[serde(default)]
+    pub required: Option<bool>,
+    #[serde(default)]
+    pub bypassable: Option<bool>,
+    #[serde(default)]
+    pub check: Check,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PullRequestChecks {
+    /// The commit the checks were reported against.
+    #[serde(default)]
+    pub commit_sha: Option<String>,
+    #[serde(default)]
+    pub checks: Vec<PullRequestCheck>,
+}
+
+impl PullRequestChecks {
+    /// Whether anything required is not green.
+    ///
+    /// A required check that is still running counts as blocking: the answer to
+    /// "can this merge" is no, not yet.
+    pub fn required_blocking(&self) -> Vec<&PullRequestCheck> {
+        self.checks
+            .iter()
+            .filter(|c| c.required.unwrap_or(false) && !c.check.status.is_success())
+            .collect()
+    }
+
+    pub fn any_failed(&self) -> bool {
+        self.checks.iter().any(|c| c.check.status.is_failed())
     }
 }

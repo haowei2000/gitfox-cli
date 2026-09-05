@@ -117,6 +117,10 @@ impl Renderer {
     }
 
     pub fn emit<T: Render>(&self, value: &T) -> io::Result<()> {
+        forgive_broken_pipe(self.write(value))
+    }
+
+    fn write<T: Render>(&self, value: &T) -> io::Result<()> {
         let mut out = io::stdout().lock();
         match self.format {
             OutputFormat::Table => {
@@ -141,6 +145,10 @@ impl Renderer {
     /// Errors go to stdout in machine modes (so the envelope is pipeable) and
     /// to stderr for humans (so it does not pollute a piped table).
     pub fn emit_error(&self, err: &CliError) -> io::Result<()> {
+        forgive_broken_pipe(self.write_error(err))
+    }
+
+    fn write_error(&self, err: &CliError) -> io::Result<()> {
         if self.format.is_machine() {
             let envelope = json!({ "ok": false, "error": err.to_json() });
             let mut out = io::stdout().lock();
@@ -159,6 +167,21 @@ impl Renderer {
             writeln!(err_out, "{dim}hint{reset}: {hint}")?;
         }
         err_out.flush()
+    }
+}
+
+/// Treat a closed reader as success.
+///
+/// `fx pr list | head -5` closes the pipe as soon as head has what it wants.
+/// Rust ignores `SIGPIPE`, so the write comes back as `BrokenPipe` instead of
+/// killing the process the way every other Unix tool dies — and reporting it
+/// would turn an ordinary pipeline into a failed command. Restoring the signal
+/// handler would need `unsafe`, which this workspace forbids, so the one place
+/// that writes to stdout forgives the error instead.
+pub fn forgive_broken_pipe(result: io::Result<()>) -> io::Result<()> {
+    match result {
+        Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        other => other,
     }
 }
 
@@ -259,13 +282,24 @@ mod tests {
 
     #[test]
     fn error_envelope_shape_is_stable() {
-        let err = CliError::not_implemented("fx pr list", "v0.3");
+        let err = CliError::config("no GitFox host configured")
+            .with_details(json!({ "checked": ["--host", "GITFOX_HOST"] }))
+            .with_hint("run `fx auth login`");
         let envelope = json!({ "ok": false, "error": err.to_json() });
         assert_eq!(envelope["ok"], false);
-        assert_eq!(envelope["error"]["code"], "NOT_IMPLEMENTED");
-        assert_eq!(envelope["error"]["details"]["planned_version"], "v0.3");
+        assert_eq!(envelope["error"]["code"], "CONFIG_ERROR");
+        assert_eq!(envelope["error"]["details"]["checked"][0], "--host");
         // The human-only hint must not leak into the machine contract.
         assert!(envelope["error"].get("hint").is_none());
+    }
+
+    #[test]
+    fn a_closed_reader_is_not_a_failure() {
+        let broken = Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"));
+        assert!(forgive_broken_pipe(broken).is_ok());
+        // Anything else still surfaces.
+        let real = Err(io::Error::new(io::ErrorKind::PermissionDenied, "nope"));
+        assert!(forgive_broken_pipe(real).is_err());
     }
 
     #[test]

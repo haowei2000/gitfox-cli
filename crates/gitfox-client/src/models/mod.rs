@@ -14,8 +14,8 @@ mod user;
 pub use pipeline::{CiStatus, Execution, LogLine, Pipeline, Stage, Step};
 pub use principal::Principal;
 pub use pull_request::{
-    CreatePullRequest, MergeMethod, MergePullRequest, MergeResult, PullRequest, PullRequestState,
-    PullRequestStats,
+    Check, CreatePullRequest, FileDiff, MergeMethod, MergePullRequest, MergeResult, PullRequest,
+    PullRequestCheck, PullRequestChecks, PullRequestState, PullRequestStats,
 };
 pub use repo_ref::RepoRef;
 pub use repository::Repository;

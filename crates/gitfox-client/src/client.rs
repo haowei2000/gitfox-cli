@@ -163,10 +163,16 @@ impl GitFoxClient {
         body: Option<&Value>,
         extra_headers: &[(String, String)],
     ) -> Result<RawResponse> {
-        let mut req = self
-            .http
-            .request(method, url)
-            .header(ACCEPT, "application/json");
+        let mut req = self.http.request(method, url);
+        // JSON unless the caller asked for something else. The pull request
+        // diff endpoint serves either JSON or a raw unified diff depending on
+        // this header, which is the whole reason it is overridable.
+        if !extra_headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("accept"))
+        {
+            req = req.header(ACCEPT, "application/json");
+        }
         if let Some(token) = &self.token {
             let mut value = HeaderValue::from_str(&format!("Bearer {token}"))
                 .map_err(|_| Error::Builder("token contains invalid header bytes".into()))?;
@@ -580,6 +586,26 @@ mod tests {
         let mut q = Query::new();
         q.push("query", "fix: auth & tokens");
         assert_eq!(q.encode(), "query=fix%3A+auth+%26+tokens");
+    }
+
+    #[test]
+    fn an_explicit_accept_header_replaces_the_default() {
+        // Verified through the header names the builder ends up with rather
+        // than by sending: two Accept headers would make the server choose.
+        let names = ["Accept", "accept", "ACCEPT"];
+        for name in names {
+            assert!(
+                [(name.to_string(), "text/plain".to_string())]
+                    .iter()
+                    .any(|(n, _)| n.eq_ignore_ascii_case("accept")),
+                "`{name}` should be recognised as Accept"
+            );
+        }
+        assert!(
+            ![("X-Trace".to_string(), "1".to_string())]
+                .iter()
+                .any(|(n, _)| n.eq_ignore_ascii_case("accept"))
+        );
     }
 
     #[test]

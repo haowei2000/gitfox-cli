@@ -10,7 +10,7 @@ use std::process::Output;
 use assert_cmd::Command;
 use serde_json::{Value, json};
 use tempfile::TempDir;
-use wiremock::matchers::{body_json, method, path, query_param};
+use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// A `fx` invocation isolated from the developer's real environment: its own
@@ -132,20 +132,56 @@ fn an_unparseable_environment_variable_is_reported_not_ignored() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn commands_still_on_the_roadmap_say_so_in_a_structured_way() {
+fn every_command_in_the_surface_is_wired_up() {
+    // This replaces the roadmap test: nothing answers NOT_IMPLEMENTED any more,
+    // so the check is that no command falls through to it.
     let home = TempDir::new().unwrap();
-    // Everything in the v0.1-v0.4 scope is implemented; only v0.5 remains.
-    for (args, command, version) in [
-        (vec!["--agent", "pr", "diff"], "fx pr diff", "v0.5"),
-        (vec!["--agent", "pr", "checks"], "fx pr checks", "v0.5"),
-        (vec!["--agent", "pr", "checkout"], "fx pr checkout", "v0.5"),
+    for args in [
+        vec!["--agent", "repo", "list"],
+        vec!["--agent", "pr", "list"],
+        vec!["--agent", "pr", "diff"],
+        vec!["--agent", "pr", "checks"],
+        vec!["--agent", "pr", "checkout"],
+        vec!["--agent", "pipeline", "list"],
+        vec!["--agent", "pipeline", "logs"],
     ] {
-        let output = fx(home.path()).args(&args).output().unwrap();
-        assert_eq!(code(&output), 9, "for {args:?}");
-        let body = stdout_json(&output);
-        assert_eq!(body["error"]["code"], "NOT_IMPLEMENTED");
-        assert_eq!(body["error"]["details"]["command"], command);
-        assert_eq!(body["error"]["details"]["planned_version"], version);
+        let output = fx(home.path())
+            .env("GITFOX_HOST", "https://git.example.com")
+            .env("GITFOX_TOKEN", "t")
+            .env("GITFOX_REPO", "ai/backend")
+            .env("GITFOX_RETRIES", "0")
+            .env("GITFOX_TIMEOUT", "2")
+            .args(&args)
+            .output()
+            .unwrap();
+        // They fail — there is no server — but never with code 9.
+        assert_ne!(code(&output), 9, "{args:?} is still a stub");
+    }
+}
+
+#[test]
+fn completion_scripts_are_generated_for_the_usual_shells() {
+    let home = TempDir::new().unwrap();
+    for (shell, marker) in [
+        ("zsh", "#compdef fx"),
+        ("bash", "_fx"),
+        ("fish", "complete"),
+    ] {
+        let output = fx(home.path())
+            .args(["completion", shell])
+            .output()
+            .unwrap();
+        assert_eq!(code(&output), 0, "for {shell}");
+        let script = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            script.contains(marker),
+            "{shell} script looks wrong:\n{script}"
+        );
+        // The generated script must cover the real command tree.
+        assert!(
+            script.contains("pipeline"),
+            "{shell} script is missing commands"
+        );
     }
 }
 
@@ -1816,4 +1852,324 @@ async fn rate_limiting_has_its_own_code_and_reports_the_servers_delay() {
     let error = &stdout_json(&output)["error"];
     assert_eq!(error["code"], "RATE_LIMITED");
     assert_eq!(error["details"]["retry_after_secs"], 12);
+}
+
+// ---------------------------------------------------------------------------
+// fx pr diff / checks / checkout
+// ---------------------------------------------------------------------------
+
+const RAW_DIFF: &str = "diff --git a/src/main.rs b/src/main.rs\n@@ -1,2 +1,2 @@\n-old\n+new\n";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_diff_asks_for_the_form_that_suits_the_output_mode() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PR_PATH}/12")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(sample_pr(12)))
+        .mount(&server)
+        .await;
+    // A person gets the raw patch their pager understands…
+    Mock::given(method("GET"))
+        .and(path(format!("{PR_PATH}/12/diff")))
+        .and(header("accept", "text/plain"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(RAW_DIFF))
+        .mount(&server)
+        .await;
+    // …a machine gets it split by file.
+    Mock::given(method("GET"))
+        .and(path(format!("{PR_PATH}/12/diff")))
+        .and(header("accept", "application/json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "path": "src/main.rs", "status": "modified",
+            "additions": 1, "deletions": 1, "changes": 2,
+            "patch": "@@ -1,2 +1,2 @@\n-old\n+new"
+        }])))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let env = |cmd: &mut Command| {
+        cmd.env("GITFOX_HOST", server.uri())
+            .env("GITFOX_TOKEN", "t")
+            .env("GITFOX_REPO", "ai/backend");
+    };
+
+    let mut human = fx(home.path());
+    env(&mut human);
+    let human = human.args(["pr", "diff", "12"]).output().unwrap();
+    assert_eq!(
+        code(&human),
+        0,
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
+    let text = String::from_utf8_lossy(&human.stdout);
+    assert!(text.starts_with("diff --git"), "{text}");
+    assert!(text.contains("+new"), "{text}");
+
+    let mut machine = fx(home.path());
+    env(&mut machine);
+    let machine = machine
+        .args(["--agent", "pr", "diff", "12"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&machine), 0);
+    let data = &stdout_json(&machine)["data"];
+    assert_eq!(data["count"], 1);
+    assert_eq!(data["files"][0]["path"], "src/main.rs");
+    assert!(data["files"][0]["patch"].as_str().unwrap().contains("+new"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_diff_name_only_leaves_the_patches_out() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PR_PATH}/12")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(sample_pr(12)))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PR_PATH}/12/diff")))
+        .and(header("accept", "application/json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "path": "src/main.rs", "status": "modified",
+            "additions": 1, "deletions": 1, "patch": "@@ -1 +1 @@"
+        }])))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "diff", "12", "--name-only"])
+        .output()
+        .unwrap();
+
+    assert_eq!(code(&output), 0);
+    let files = &stdout_json(&output)["data"]["files"];
+    assert_eq!(files[0]["path"], "src/main.rs");
+    assert!(files[0]["patch"].is_null(), "--name-only must omit patches");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_checks_separates_blocking_from_merely_failing() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PR_PATH}/12")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(sample_pr(12)))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PR_PATH}/12/checks")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "commit_sha": "abc123",
+            "checks": [
+                { "required": true,  "check": { "identifier": "build", "status": "success" } },
+                { "required": true,  "check": { "identifier": "test",  "status": "running" } },
+                { "required": false, "check": { "identifier": "audit", "status": "failure" } }
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "checks", "12"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let data = &stdout_json(&output)["data"];
+    assert_eq!(data["count"], 3);
+    assert_eq!(data["commit_sha"], "abc123");
+    // `audit` failed but is optional; `test` is required and still running.
+    assert_eq!(data["failed"], true);
+    assert_eq!(data["blocking"], 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_checkout_fetches_the_branch_and_switches_to_it() {
+    let home = TempDir::new().unwrap();
+
+    // A source repository with the pull request's branch on it.
+    let source = home.path().join("source");
+    std::fs::create_dir(&source).unwrap();
+    git(&source, &["init", "-q", "-b", "main"]);
+    git(&source, &["config", "user.email", "t@example.com"]);
+    git(&source, &["config", "user.name", "Test"]);
+    git(&source, &["commit", "-q", "--allow-empty", "-m", "initial"]);
+    git(&source, &["checkout", "-q", "-b", "feat/oauth"]);
+    std::fs::write(source.join("oauth.rs"), "fn main() {}").unwrap();
+    git(&source, &["add", "oauth.rs"]);
+    git(&source, &["commit", "-q", "-m", "feat: add OAuth"]);
+    git(&source, &["checkout", "-q", "main"]);
+
+    // …and a clone of it, which is where fx runs.
+    let work = home.path().join("work");
+    let status = std::process::Command::new("git")
+        .args([
+            "clone",
+            "-q",
+            source.to_str().unwrap(),
+            work.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    git(&work, &["config", "user.email", "t@example.com"]);
+    git(&work, &["config", "user.name", "Test"]);
+
+    let server = MockServer::start().await;
+    let mut pr = sample_pr(12);
+    // Same repository on both sides, so the branch is on this remote.
+    pr["source_repo_id"] = json!(1);
+    pr["target_repo_id"] = json!(1);
+    Mock::given(method("GET"))
+        .and(path(format!("{PR_PATH}/12")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(pr))
+        .mount(&server)
+        .await;
+
+    let mut cmd = fx(home.path());
+    cmd.current_dir(&work)
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "checkout", "12"]);
+    let output = cmd.output().unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let data = &stdout_json(&output)["data"];
+    assert_eq!(data["branch"], "feat/oauth");
+    assert_eq!(data["created_branch"], true);
+
+    // The checkout really happened.
+    let head = std::process::Command::new("git")
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .current_dir(&work)
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&head.stdout).trim(), "feat/oauth");
+    assert!(
+        work.join("oauth.rs").exists(),
+        "the branch's content is there"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_checkout_refuses_a_fork_rather_than_guessing() {
+    let server = MockServer::start().await;
+    let mut pr = sample_pr(12);
+    pr["source_repo_id"] = json!(2);
+    pr["target_repo_id"] = json!(1);
+    Mock::given(method("GET"))
+        .and(path(format!("{PR_PATH}/12")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(pr))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "checkout", "12"])
+        .output()
+        .unwrap();
+
+    assert_eq!(code(&output), 8, "git context error");
+    let error = &stdout_json(&output)["error"];
+    assert_eq!(error["code"], "GIT_CONTEXT_ERROR");
+    assert!(
+        error["message"].as_str().unwrap().contains("fork"),
+        "{error}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// pipes
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_reader_that_walks_away_is_not_a_failure() {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    // `fx completion zsh` is ~90KB, comfortably past a 64KB pipe buffer, so the
+    // child is guaranteed to still be writing when the reader closes — exactly
+    // what `| head -3` does. Rust ignores SIGPIPE, so without handling this the
+    // write comes back as an error and the command reports failure (or, for
+    // clap_complete, panics outright).
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("fx"))
+        .args(["completion", "zsh"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("fx should start");
+
+    let mut stdout = child.stdout.take().unwrap();
+    let mut head = [0u8; 64];
+    let read = stdout.read(&mut head).unwrap();
+    assert!(read > 0, "nothing was written before the pipe closed");
+    drop(stdout);
+
+    let output = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("panicked"), "fx panicked:\n{stderr}");
+    assert_eq!(output.status.code(), Some(0), "stderr:\n{stderr}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_closed_pipe_on_a_data_command_is_also_clean() {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    let server = MockServer::start().await;
+    // Enough rows that the output cannot fit in a pipe buffer in one go.
+    let items: Vec<Value> = (1..=100).map(sample_pr).collect();
+    Mock::given(method("GET"))
+        .and(path(PR_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(items))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("fx"))
+        .args(["--agent", "pr", "list", "--limit", "100"])
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .env("GITFOX_CONFIG", home.path().join("config.toml"))
+        .env("NO_COLOR", "1")
+        .current_dir(home.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("fx should start");
+
+    let mut stdout = child.stdout.take().unwrap();
+    let mut head = [0u8; 32];
+    let _ = stdout.read(&mut head).unwrap();
+    drop(stdout);
+
+    let output = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert_eq!(output.status.code(), Some(0), "stderr:\n{stderr}");
 }

@@ -33,9 +33,9 @@ pub use client::{
 };
 pub use error::{Error, Result};
 pub use models::{
-    CiStatus, CreatePullRequest, Execution, LogLine, MergeMethod, MergePullRequest, MergeResult,
-    Pipeline, Principal, PullRequest, PullRequestState, PullRequestStats, RepoRef, Repository,
-    Stage, Step, User,
+    Check, CiStatus, CreatePullRequest, Execution, FileDiff, LogLine, MergeMethod,
+    MergePullRequest, MergeResult, Pipeline, Principal, PullRequest, PullRequestCheck,
+    PullRequestChecks, PullRequestState, PullRequestStats, RepoRef, Repository, Stage, Step, User,
 };
 pub use pull_request::PullRequestFilter;
 pub use repo::RepoSort;

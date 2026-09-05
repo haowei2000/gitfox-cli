@@ -181,6 +181,72 @@ pub fn clone(url: &str, destination: &Path) -> Result<(), String> {
     })
 }
 
+/// The remote to fetch from: `origin` if it exists, else the first one.
+pub fn remote_name() -> Option<String> {
+    let remotes = run(&["remote"])?;
+    let mut names = remotes.lines().map(str::trim).filter(|n| !n.is_empty());
+    if remotes.lines().any(|n| n.trim() == "origin") {
+        return Some("origin".to_string());
+    }
+    names.next().map(str::to_string)
+}
+
+pub fn local_branch_exists(branch: &str) -> bool {
+    run_checked(&[
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        &format!("refs/heads/{branch}"),
+    ])
+    .is_ok()
+}
+
+/// `git fetch <remote> <branch>`, leaving the result in `FETCH_HEAD`.
+pub fn fetch(remote: &str, branch: &str) -> Result<(), String> {
+    run_checked(&["fetch", remote, branch]).map(|_| ())
+}
+
+/// Create `branch` at `start` and switch to it.
+pub fn checkout_new(branch: &str, start: &str) -> Result<(), String> {
+    run_checked(&["checkout", "-b", branch, start]).map(|_| ())
+}
+
+pub fn checkout(branch: &str) -> Result<(), String> {
+    run_checked(&["checkout", branch]).map(|_| ())
+}
+
+/// Fast-forward only: an existing local branch that has diverged is a conflict
+/// for the user to resolve, not something to merge behind their back.
+pub fn merge_ff_only(rev: &str) -> Result<(), String> {
+    run_checked(&["merge", "--ff-only", rev]).map(|_| ())
+}
+
+pub fn set_upstream(branch: &str, remote: &str) -> Result<(), String> {
+    run_checked(&[
+        "branch",
+        &format!("--set-upstream-to={remote}/{branch}"),
+        branch,
+    ])
+    .map(|_| ())
+}
+
+/// Run git and keep the failure message, unlike [`run`] which discards it.
+fn run_checked(args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .args(args)
+        .output()
+        .map_err(|e| format!("could not run git: {e}"))?;
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if stderr.is_empty() {
+        format!("git {} failed", args.first().copied().unwrap_or("command"))
+    } else {
+        stderr
+    })
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Remote {
     pub host: Option<String>,

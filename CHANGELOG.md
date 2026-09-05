@@ -8,6 +8,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+* `fx pr diff`, `fx pr checks` and `fx pr checkout`, completing the command
+  surface — nothing answers `NOT_IMPLEMENTED` any more.
+  * `pr diff` uses the endpoint's content negotiation: a raw unified diff for
+    people, per-file entries with patches for machines. `--name-only` drops the
+    patches.
+  * `pr checks` separates *failing* from *blocking*: a required check that is
+    still running blocks a merge without having failed.
+  * `pr checkout` fetches the source branch and switches to it, fast-forward
+    only for an existing local branch. A pull request from a fork is refused
+    with an explanation rather than guessed at.
+* `fx completion bash|zsh|fish|…`.
+
+### Fixed
+
+* `fx <anything> | head` no longer fails or panics. Rust ignores `SIGPIPE`, so a
+  closed reader surfaced as a write error — and `clap_complete` panicked on it,
+  making `fx completion zsh | head` crash outright. The single place that writes
+  to stdout now treats a closed reader as success.
+
 * Transparent pagination for `repo list`, `pr list` and `pipeline list`.
   `--limit` is now a total rather than a page size: fx walks pages at up to 100
   rows per request. Every list carries `truncated`, observed by asking for one

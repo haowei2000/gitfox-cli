@@ -11,16 +11,20 @@
 //! | merge         | `POST …/pullreq/{pullreq_number}/merge` |
 //! | delete branch | `DELETE …/pullreq/{pullreq_number}/branch` |
 //! | close/reopen  | `POST …/pullreq/{pullreq_number}/state` |
-//! | diff          | `GET …/pullreq/{pullreq_number}/diff` (v0.5) |
-//! | checks        | `GET …/pullreq/{pullreq_number}/checks` (v0.5) |
-//! | commits       | `GET …/pullreq/{pullreq_number}/commits` (v0.5) |
+//! | diff          | `GET …/pullreq/{pullreq_number}/diff` |
+//! | checks        | `GET …/pullreq/{pullreq_number}/checks` |
+//! | commits       | `GET …/pullreq/{pullreq_number}/commits` (unused so far) |
+//!
+//! The diff endpoint content-negotiates: `application/json` yields per-file
+//! entries, `text/plain` a raw unified diff. `fx pr diff` picks by output mode.
 
 use serde_json::json;
 
 use crate::client::{GitFoxClient, Method, Query};
 use crate::error::Result;
 use crate::models::{
-    CreatePullRequest, MergePullRequest, MergeResult, PullRequest, PullRequestState, RepoRef,
+    CreatePullRequest, FileDiff, MergePullRequest, MergeResult, PullRequest, PullRequestChecks,
+    PullRequestState, RepoRef,
 };
 
 /// Filters for [`PullRequestsApi::list`].
@@ -159,6 +163,43 @@ impl<'a> PullRequestsApi<'a> {
             )
             .await
             .map(|_| ())
+    }
+
+    /// `GET …/pullreq/{pullreq_number}/diff` as structured per-file entries.
+    ///
+    /// The endpoint content-negotiates: JSON here, raw text in
+    /// [`Self::diff_text`]. Both describe the same change.
+    pub async fn diff_files(&self, repo: &RepoRef, number: u64) -> Result<Vec<FileDiff>> {
+        self.client
+            .get_json(&format!(
+                "/api/v1/repos/{}/pullreq/{number}/diff",
+                repo.encoded()
+            ))
+            .await
+    }
+
+    /// `GET …/pullreq/{pullreq_number}/diff` as a raw unified diff.
+    pub async fn diff_text(&self, repo: &RepoRef, number: u64) -> Result<String> {
+        let response = self
+            .client
+            .request(
+                Method::GET,
+                &format!("/api/v1/repos/{}/pullreq/{number}/diff", repo.encoded()),
+                None,
+                &[("Accept".to_string(), "text/plain".to_string())],
+            )
+            .await?;
+        Ok(response.text)
+    }
+
+    /// `GET …/pullreq/{pullreq_number}/checks`
+    pub async fn checks(&self, repo: &RepoRef, number: u64) -> Result<PullRequestChecks> {
+        self.client
+            .get_json(&format!(
+                "/api/v1/repos/{}/pullreq/{number}/checks",
+                repo.encoded()
+            ))
+            .await
     }
 
     /// `POST /api/v1/repos/{repo_ref}/pullreq/{pullreq_number}/state`

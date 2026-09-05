@@ -3,6 +3,7 @@
 
 pub mod api;
 pub mod auth;
+pub mod completion;
 pub mod config;
 pub mod pipeline;
 pub mod pr;
@@ -20,5 +21,6 @@ pub async fn dispatch(command: Command, ctx: &Context) -> Result<()> {
         Command::Pr(cmd) => pr::run(cmd, ctx).await,
         Command::Pipeline(cmd) => pipeline::run(cmd, ctx).await,
         Command::Config(cmd) => config::run(cmd, ctx),
+        Command::Completion(args) => completion::run(args),
     }
 }

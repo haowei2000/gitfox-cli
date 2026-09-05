@@ -23,14 +23,13 @@ machine never has to parse prose:
 
 ## Status
 
-**v0.6 — the machine interface is hardened.** The twelve core commands are
-implemented against a verified GitFox API v1.3.0, lists page transparently and
-say when they were truncated, transient failures are retried, and the JSON
-contract is written down in [docs/json-schema.md](docs/json-schema.md).
+**Every command in the surface is implemented.** `repo`, `pr`, `pipeline`,
+`auth`, `config`, `api` and `completion` all work against a verified GitFox API
+v1.3.0. Lists page transparently and say when they were truncated, transient
+failures are retried, and the JSON contract is written down in
+[docs/json-schema.md](docs/json-schema.md).
 
-Still on the roadmap: `fx pr checkout|diff|checks` and shell completion (v0.5),
-then MCP (v0.7). Those three commands return a structured `NOT_IMPLEMENTED`
-error, and `fx api` reaches every endpoint in the meantime.
+Next: `fx-mcp` (v0.7), reusing `gitfox-client` directly.
 
 ## Install
 
@@ -115,6 +114,20 @@ fx --agent pr create -B main -H feat/oauth -t "feat: add OAuth" -b "Closes #4"
 fx --agent pr merge 12 -m squash --delete-branch
 ```
 
+Reviewing one:
+
+```bash
+fx pr diff              # the raw patch, for your pager
+fx pr diff --name-only  # just what changed
+fx pr checks            # what CI says, and what is blocking the merge
+fx pr checkout 12       # fetch the branch and switch to it
+```
+
+`fx pr diff` picks its form from the output mode: a person gets the unified
+patch their pager and highlighter understand, `--agent` gets it split by file
+with per-file patches (`--name-only` omits them). The endpoint content-
+negotiates, so neither form is reassembled from the other.
+
 Two flags worth knowing:
 
 * `fx pr merge --dry-run` answers "would this merge?" without merging, which is
@@ -154,6 +167,14 @@ fx --agent pipeline logs --failed
 Inside a checkout with one pipeline, nothing needs naming: the pipeline is
 inferred, and the run defaults to the most recent. A green run answers with an
 empty `steps` and exit 0 — "nothing failed" is a result, not an error.
+
+## Shell completion
+
+```bash
+fx completion zsh  > ~/.zfunc/_fx
+fx completion bash > /usr/local/etc/bash_completion.d/fx
+fx completion fish > ~/.config/fish/completions/fx.fish
+```
 
 ## `fx api` — the escape hatch
 
@@ -336,9 +357,9 @@ Two rules keep this from rotting:
 | **v0.2** ✅ | `repo list/view/clone`, git remote detection, `-R`, multi-host |
 | **v0.3** ✅ | `pr list/view/create/merge` — the first genuinely daily-usable release |
 | **v0.4** ✅ | `pipeline list/view/logs/run/retry`, including `logs --failed` |
-| v0.5 ◐ | `pr create --fill` ✅; `pr checkout/diff/checks` and shell completion to come |
+| **v0.5** ✅ | `pr checkout/diff/checks`, `pr create --fill`, shell completion |
 | **v0.6** ✅ | agent hardening: pagination, retries, non-interactive edges, schema freeze |
-| v0.7 | `fx-mcp`, reusing `gitfox-client` directly |
+| v0.7 → | `fx-mcp`, reusing `gitfox-client` directly |
 | v1.0 | CLI syntax, JSON schema, config format and exit codes all stable |
 
 The twelve commands v0.1–v0.4 aim to make rock solid: `auth login/logout/status`,

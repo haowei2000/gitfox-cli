@@ -153,6 +153,27 @@ one, whether or not a dedicated command exists yet.
 
     /// Read and write fx configuration
     Config(ConfigCommand),
+
+    /// Print a shell completion script
+    #[command(long_about = "\
+Print a shell completion script.
+
+  # zsh
+  fx completion zsh > ~/.zfunc/_fx
+
+  # bash
+  fx completion bash > /usr/local/etc/bash_completion.d/fx
+
+  # fish
+  fx completion fish > ~/.config/fish/completions/fx.fish")]
+    Completion(CompletionArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct CompletionArgs {
+    /// Shell to generate for
+    #[arg(value_name = "SHELL")]
+    pub shell: clap_complete::Shell,
 }
 
 // ---------------------------------------------------------------------------
@@ -341,7 +362,7 @@ pub enum PrSubcommand {
     /// Check out a pull request branch locally
     Checkout(PrNumberArgs),
     /// Show a pull request's diff
-    Diff(PrNumberArgs),
+    Diff(PrDiffArgs),
     /// Show the status of a pull request's checks
     Checks(PrNumberArgs),
 }
@@ -382,6 +403,17 @@ pub struct PrListArgs {
     /// Only pull requests opened by this user
     #[arg(long, value_name = "USER")]
     pub author: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PrDiffArgs {
+    /// Pull request number; defaults to the one for the current branch
+    #[arg(value_name = "NUMBER")]
+    pub number: Option<u64>,
+
+    /// List the changed files without their patches
+    #[arg(long)]
+    pub name_only: bool,
 }
 
 #[derive(Debug, Args)]
