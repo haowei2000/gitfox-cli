@@ -229,7 +229,9 @@ pub fn relative_time(epoch: i64) -> String {
     }
     match delta {
         d if d < 60 => "just now".to_string(),
-        d if d < 3600 => format!("{}m ago", d / 60),
+        // `min`, not `m`: a column showing both "1m ago" and "1mo ago" is
+        // asking to be misread, and real listings do show both at once.
+        d if d < 3600 => format!("{}min ago", d / 60),
         d if d < 86_400 => format!("{}h ago", d / 3600),
         d if d < 2_592_000 => format!("{}d ago", d / 86_400),
         d if d < 31_536_000 => format!("{}mo ago", d / 2_592_000),
@@ -327,6 +329,9 @@ mod tests {
         assert_eq!(relative_time(three_days * 1000), "3d ago");
         assert_eq!(relative_time(now), "just now");
         assert_eq!(relative_time(now - 7200), "2h ago");
+        // Minutes must not be confusable with months in the same column.
+        assert_eq!(relative_time(now - 120), "2min ago");
+        assert_eq!(relative_time(now - 60 * 86_400), "2mo ago");
     }
 
     #[test]

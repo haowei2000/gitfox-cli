@@ -141,6 +141,7 @@ Two flags worth knowing:
 fx pipeline list            # every pipeline's latest run, one request
 fx pipeline view            # the newest run, with its stage/step tree
 fx pipeline logs --failed   # only the steps that failed
+fx pipeline logs --failed --tail 50
 fx pipeline retry           # run it again
 ```
 
@@ -167,6 +168,10 @@ fx --agent pipeline logs --failed
 Inside a checkout with one pipeline, nothing needs naming: the pipeline is
 inferred, and the run defaults to the most recent. A green run answers with an
 empty `steps` and exit 0 — "nothing failed" is a result, not an error.
+
+A failed build's log is mostly progress output and the reason is at the end, so
+`--tail N` keeps that end. Each step reports `total_lines` alongside `lines`, so
+nothing is dropped silently.
 
 ## Shell completion
 
@@ -201,6 +206,12 @@ Resolved through one precedence chain, top to bottom:
 ```
 CLI flag  >  environment variable  >  config file  >  git context  >  default
 ```
+
+The git tier only speaks for remotes that point at the resolved GitFox host. A
+checkout of some other host has a perfectly good `owner/name` that means nothing
+to this instance, so fx says it could not infer a repository rather than asking
+GitFox about a GitHub project. Several remotes are fine — the one matching the
+host is the one that counts.
 
 ### Environment variables
 

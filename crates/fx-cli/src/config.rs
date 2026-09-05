@@ -155,14 +155,45 @@ pub struct Overrides {
     pub no_color: bool,
 }
 
-/// Repository information inferred from the surrounding git checkout.
+/// What the surrounding git checkout offers: its remotes.
 ///
-/// Populated in v0.2 by parsing `git remote get-url origin`; the slot exists
-/// now so the precedence chain — and its tests — are already complete.
+/// The bottom tier of the chain, and the only one that can be *wrong* rather
+/// than merely absent — a checkout of an unrelated host has a perfectly valid
+/// `owner/name` that means nothing to this GitFox instance. See
+/// [`GitContext::repo_for`].
 #[derive(Debug, Default, Clone)]
 pub struct GitContext {
-    pub host: Option<String>,
-    pub repo: Option<String>,
+    pub remotes: Vec<crate::git::Remote>,
+}
+
+impl GitContext {
+    /// The first remote that can supply an API base URL.
+    ///
+    /// Only HTTP(S) remotes can: an SSH remote names a host but says nothing
+    /// about which scheme or port the API answers on.
+    pub fn api_base(&self) -> Option<String> {
+        self.remotes.iter().find_map(|r| r.api_base.clone())
+    }
+
+    /// The repository, but only from a remote that points at `host_key`.
+    ///
+    /// This gate is the whole point. Without it, running fx inside a checkout
+    /// of some other host — a GitHub clone, say — infers that project's
+    /// `owner/name` and asks GitFox about it, producing a confident
+    /// REPO_NOT_FOUND that reads like a permissions problem. A remote whose
+    /// host is not this GitFox instance has nothing to say about which
+    /// repository is meant.
+    pub fn repo_for(&self, host_key: Option<&str>) -> Option<String> {
+        let host_key = host_key?;
+        self.remotes
+            .iter()
+            .find(|r| {
+                r.host_key
+                    .as_deref()
+                    .is_some_and(|h| h.eq_ignore_ascii_case(host_key))
+            })
+            .map(|r| r.repo.clone())
+    }
 }
 
 /// Whether the process is attached to a terminal. Passed in rather than probed
@@ -318,7 +349,7 @@ pub fn resolve(
                 .as_deref()
                 .and_then(|key| file.api_url_for(key))
         })
-        .or_else(|| git.host.clone());
+        .or_else(|| git.api_base());
 
     let host_key = host.as_deref().and_then(host_key_of);
 
@@ -393,16 +424,19 @@ pub fn resolve(
     let color = !(cli.no_color || agent || env.is_set(ENV_NO_COLOR) || !tty.stdout)
         && output == OutputFormat::Table;
 
+    let repo = cli
+        .repo
+        .clone()
+        .or_else(|| env.get(ENV_REPO))
+        // Only from a remote that actually points at this instance.
+        .or_else(|| git.repo_for(host_key.as_deref()));
+
     Ok(Resolved {
         host,
         host_key,
         token,
         token_source,
-        repo: cli
-            .repo
-            .clone()
-            .or_else(|| env.get(ENV_REPO))
-            .or_else(|| git.repo.clone()),
+        repo,
         org: cli.org.clone().or_else(|| env.get(ENV_ORG)),
         output,
         timeout_secs,
@@ -449,6 +483,16 @@ mod tests {
         resolve(&cli, &env, &file, &git, Tty::interactive()).expect("resolve should succeed")
     }
 
+    /// A checkout whose remotes are the given URLs, parsed as git would.
+    fn checkout(urls: &[&str]) -> GitContext {
+        GitContext {
+            remotes: urls
+                .iter()
+                .filter_map(|u| crate::git::parse_remote(u))
+                .collect(),
+        }
+    }
+
     fn file_with_default(host: &str, api_url: &str) -> ConfigFile {
         let mut file = ConfigFile {
             default_host: Some(host.to_string()),
@@ -475,10 +519,7 @@ mod tests {
             },
             MapEnv::new([(ENV_HOST, "https://git.env.com")]),
             file_with_default("git.example.com", "https://git.example.com"),
-            GitContext {
-                host: Some("https://git.remote.com".into()),
-                ..Default::default()
-            },
+            checkout(&["https://git.remote.com/ai/backend.git"]),
         );
         assert_eq!(r.host.as_deref(), Some("https://git.cli.com"));
         assert_eq!(r.host_key.as_deref(), Some("git.cli.com"));
@@ -490,10 +531,7 @@ mod tests {
             Overrides::default(),
             MapEnv::new([(ENV_HOST, "https://git.env.com")]),
             file_with_default("git.example.com", "https://git.example.com"),
-            GitContext {
-                host: Some("https://git.remote.com".into()),
-                ..Default::default()
-            },
+            checkout(&["https://git.remote.com/ai/backend.git"]),
         );
         assert_eq!(r.host.as_deref(), Some("https://git.env.com"));
     }
@@ -504,10 +542,7 @@ mod tests {
             Overrides::default(),
             MapEnv::default(),
             file_with_default("git.example.com", "https://git.example.com"),
-            GitContext {
-                host: Some("https://git.remote.com".into()),
-                ..Default::default()
-            },
+            checkout(&["https://git.remote.com/ai/backend.git"]),
         );
         assert_eq!(r.host.as_deref(), Some("https://git.example.com"));
     }
@@ -518,10 +553,7 @@ mod tests {
             Overrides::default(),
             MapEnv::default(),
             ConfigFile::default(),
-            GitContext {
-                host: Some("https://git.remote.com".into()),
-                repo: Some("ai/backend".into()),
-            },
+            checkout(&["https://git.remote.com/ai/backend.git"]),
         );
         assert_eq!(r.host.as_deref(), Some("https://git.remote.com"));
         assert_eq!(r.repo.as_deref(), Some("ai/backend"));
@@ -604,10 +636,9 @@ mod tests {
 
     #[test]
     fn repo_precedence_is_cli_then_env_then_git() {
-        let git = GitContext {
-            repo: Some("git/repo".into()),
-            ..Default::default()
-        };
+        // The remote must point at the resolved host for its repo to count,
+        // and the host here comes from the remote itself.
+        let git = checkout(&["https://git.example.com/git/from/remote.git"]);
         let with_cli = resolved(
             Overrides {
                 repo: Some("cli/repo".into()),
@@ -633,7 +664,62 @@ mod tests {
             ConfigFile::default(),
             git,
         );
-        assert_eq!(with_git.repo.as_deref(), Some("git/repo"));
+        assert_eq!(with_git.repo.as_deref(), Some("from/remote"));
+    }
+
+    #[test]
+    fn a_checkout_of_another_host_contributes_no_repository() {
+        // Running fx inside a GitHub clone while pointed at GitFox: the remote
+        // has a perfectly good `owner/name` that means nothing to the instance
+        // being asked, and adopting it produces a confident REPO_NOT_FOUND that
+        // reads like a permissions problem.
+        let r = resolved(
+            Overrides::default(),
+            MapEnv::new([(ENV_HOST, "http://10.1.1.32:3000")]),
+            ConfigFile::default(),
+            checkout(&["git@github.com:haowei2000/gitfox-cli.git"]),
+        );
+        assert_eq!(r.host.as_deref(), Some("http://10.1.1.32:3000"));
+        assert_eq!(r.repo, None);
+    }
+
+    #[test]
+    fn the_remote_that_matches_the_host_is_the_one_that_counts() {
+        // Several remotes, only one of them this instance's.
+        let r = resolved(
+            Overrides::default(),
+            MapEnv::new([(ENV_HOST, "http://10.1.1.32:3000")]),
+            ConfigFile::default(),
+            checkout(&[
+                "ssh://aliyun3/srv/git/AgentNexus.git",
+                "git@github.com:Grant-Huang/AgentNexus.git",
+                "ssh://git@10.1.1.32:3322/ai-repos/GrantNexus.git",
+            ]),
+        );
+        assert_eq!(r.repo.as_deref(), Some("ai-repos/GrantNexus"));
+    }
+
+    #[test]
+    fn an_ssh_remote_names_the_repository_but_not_the_host_to_use() {
+        // SSH gives no API base, so without a configured host there is nothing
+        // to match against and nothing is inferred.
+        let alone = resolved(
+            Overrides::default(),
+            MapEnv::default(),
+            ConfigFile::default(),
+            checkout(&["git@10.1.1.32:ai/backend.git"]),
+        );
+        assert_eq!(alone.host, None);
+        assert_eq!(alone.repo, None);
+
+        // With the host configured, the same remote does identify the repo.
+        let with_host = resolved(
+            Overrides::default(),
+            MapEnv::new([(ENV_HOST, "http://10.1.1.32:3000")]),
+            ConfigFile::default(),
+            checkout(&["git@10.1.1.32:ai/backend.git"]),
+        );
+        assert_eq!(with_host.repo.as_deref(), Some("ai/backend"));
     }
 
     // -- output ------------------------------------------------------------

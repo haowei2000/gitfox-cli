@@ -515,7 +515,13 @@ asked for. Inside a checkout with a single pipeline, none of it needs naming:
 
   fx pipeline logs --failed      the failed steps of the most recent run
   fx pipeline logs 182 --failed  the failed steps of run 182
-  fx pipeline logs --step test   steps whose name contains \"test\"")]
+  fx pipeline logs --step test   steps whose name contains \"test\"
+
+A failed build's log is mostly progress output, and the reason it failed is at
+the end. --tail keeps that end; the response says how many lines there were in
+total, so nothing is dropped silently:
+
+  fx --agent pipeline logs --failed --tail 50")]
     Logs(PipelineLogsArgs),
     /// Trigger a pipeline run
     Run(PipelineRunArgs),
@@ -562,6 +568,10 @@ pub struct PipelineLogsArgs {
     /// Only steps whose name contains this
     #[arg(long, value_name = "STEP")]
     pub step: Option<String>,
+
+    /// Only the last N lines of each step — build failures are at the end
+    #[arg(long, value_name = "N")]
+    pub tail: Option<u32>,
 }
 
 #[derive(Debug, Args)]

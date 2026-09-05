@@ -16,11 +16,9 @@ use crate::config::GitContext;
 /// Everything read from the checkout in one pass.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct GitInfo {
-    /// API base URL, only when the remote is an HTTP(S) one — an SSH remote
-    /// says nothing about which port or scheme the API is on.
-    pub host: Option<String>,
-    /// `space/name`.
-    pub repo: Option<String>,
+    /// Every remote, `origin` first. All of them, because the one that points
+    /// at GitFox is not always the first — or named `origin`.
+    pub remotes: Vec<Remote>,
     /// The checked-out branch, absent when HEAD is detached.
     pub branch: Option<String>,
 }
@@ -28,52 +26,51 @@ pub struct GitInfo {
 impl GitInfo {
     pub fn to_context(&self) -> GitContext {
         GitContext {
-            host: self.host.clone(),
-            repo: self.repo.clone(),
+            remotes: self.remotes.clone(),
         }
     }
 }
 
 /// Inspect the current directory. Never fails: outside a checkout, or without
-/// `git` on PATH, every field is simply `None`.
+/// `git` on PATH, every field is simply empty.
 pub fn detect() -> GitInfo {
     if run(&["rev-parse", "--is-inside-work-tree"]).as_deref() != Some("true") {
         return GitInfo::default();
     }
-    let mut info = GitInfo {
+    GitInfo {
+        remotes: remotes(),
         branch: current_branch(),
-        ..Default::default()
-    };
-    if let Some(url) = remote_url()
-        && let Some(remote) = parse_remote(&url)
-    {
-        info.host = remote.host;
-        info.repo = Some(remote.repo);
     }
-    info
 }
 
-/// The checked-out branch, or `None` when HEAD is detached.
-///
-/// `symbolic-ref` rather than `rev-parse --abbrev-ref`: the latter fails
-/// outright on a branch with no commits yet, which is a perfectly ordinary
-/// state to run `fx` in. `symbolic-ref` answers there and fails exactly when
-/// HEAD really is detached.
+/// Every remote that parses, `origin` first.
+fn remotes() -> Vec<Remote> {
+    let Some(listing) = run(&["remote"]) else {
+        return Vec::new();
+    };
+    let mut names: Vec<&str> = listing
+        .lines()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .collect();
+    // `origin` is the convention, so it gets first refusal; the rest keep
+    // git's own order.
+    names.sort_by_key(|name| *name != "origin");
+
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let url = run(&["remote", "get-url", name])?;
+            parse_remote(&url)
+        })
+        .collect()
+}
+
 fn current_branch() -> Option<String> {
     run(&["symbolic-ref", "--short", "HEAD"]).filter(|b| !b.is_empty() && b != "HEAD")
 }
 
 /// `origin` if it exists, otherwise whichever remote is listed first.
-fn remote_url() -> Option<String> {
-    if let Some(url) = run(&["remote", "get-url", "origin"]) {
-        return Some(url);
-    }
-    let first = run(&["remote"])?.lines().next()?.trim().to_string();
-    if first.is_empty() {
-        return None;
-    }
-    run(&["remote", "get-url", &first])
-}
 
 fn run(args: &[&str]) -> Option<String> {
     let output = Command::new("git").args(args).output().ok()?;
@@ -247,14 +244,19 @@ fn run_checked(args: &[&str]) -> Result<String, String> {
     })
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Remote {
-    pub host: Option<String>,
+    /// The hostname, for any scheme — this is what decides whether the remote
+    /// is the GitFox one. The port is deliberately excluded: GitFox serves git
+    /// over SSH on one port and its API over HTTP on another.
+    pub host_key: Option<String>,
+    /// An API base URL, only for HTTP(S) remotes. An SSH remote says nothing
+    /// about which scheme or port the API is on.
+    pub api_base: Option<String>,
     pub repo: String,
 }
 
-/// Pull `space/name` — and, for HTTP remotes, the API base URL — out of a git
-/// remote URL.
+/// Pull `space/name` and the host out of a git remote URL.
 ///
 /// GitFox serves git over `<base>/git/<space>/<name>.git`, so the `git/` prefix
 /// is stripped when present. Nested spaces (`org/team/repo`) survive intact.
@@ -266,31 +268,36 @@ pub fn parse_remote(url: &str) -> Option<Remote> {
 
     // scp-like syntax: git@host:space/repo.git
     if !url.contains("://")
-        && let Some((_prefix, path)) = url.split_once(':')
+        && let Some((prefix, path)) = url.split_once(':')
         && url.contains('@')
     {
+        let host = prefix.rsplit('@').next().filter(|h| !h.is_empty());
         return Some(Remote {
-            host: None,
+            host_key: host.map(str::to_string),
+            api_base: None,
             repo: clean_path(path)?,
         });
     }
 
     let parsed = url::Url::parse(url).ok()?;
     let repo = clean_path(parsed.path())?;
-    let host = match parsed.scheme() {
+    let host_key = parsed.host_str().map(str::to_string);
+    let api_base = match parsed.scheme() {
         "http" | "https" => {
             let mut base = parsed.clone();
             base.set_path("");
             base.set_query(None);
             base.set_fragment(None);
-            // `Url` renders this as "http://host/"; the trailing slash is what
-            // `Url::join` wants anyway.
             Some(base.as_str().trim_end_matches('/').to_string())
         }
         // ssh:// and git:// carry no usable API base.
         _ => None,
     };
-    Some(Remote { host, repo })
+    Some(Remote {
+        host_key,
+        api_base,
+        repo,
+    })
 }
 
 fn clean_path(path: &str) -> Option<String> {
@@ -313,22 +320,28 @@ mod tests {
     fn parses_scp_style_ssh_remotes() {
         let r = parse_remote("git@git.example.com:ai/backend.git").unwrap();
         assert_eq!(r.repo, "ai/backend");
-        // An SSH remote cannot tell us the API scheme or port.
-        assert_eq!(r.host, None);
+        // The host is known even over SSH — that is what identifies the
+        // instance — but the API scheme and port are not.
+        assert_eq!(r.host_key.as_deref(), Some("git.example.com"));
+        assert_eq!(r.api_base, None);
     }
 
     #[test]
-    fn parses_ssh_url_remotes() {
-        let r = parse_remote("ssh://git@git.example.com:22/ai/backend.git").unwrap();
-        assert_eq!(r.repo, "ai/backend");
-        assert_eq!(r.host, None);
+    fn parses_ssh_url_remotes_and_ignores_the_git_port() {
+        // GitFox serves git over SSH on one port and its API over HTTP on
+        // another, so the port must not be part of the host key.
+        let r = parse_remote("ssh://git@10.1.1.32:3322/ai-repos/GrantNexus.git").unwrap();
+        assert_eq!(r.repo, "ai-repos/GrantNexus");
+        assert_eq!(r.host_key.as_deref(), Some("10.1.1.32"));
+        assert_eq!(r.api_base, None);
     }
 
     #[test]
-    fn parses_http_remotes_and_keeps_the_port() {
+    fn parses_http_remotes_and_keeps_the_port_in_the_api_base() {
         let r = parse_remote("http://10.1.1.32:3000/git/ai/backend.git").unwrap();
         assert_eq!(r.repo, "ai/backend");
-        assert_eq!(r.host.as_deref(), Some("http://10.1.1.32:3000"));
+        assert_eq!(r.host_key.as_deref(), Some("10.1.1.32"));
+        assert_eq!(r.api_base.as_deref(), Some("http://10.1.1.32:3000"));
     }
 
     #[test]
@@ -424,12 +437,62 @@ mod tests {
     #[test]
     fn a_detected_context_feeds_the_precedence_chain() {
         let info = GitInfo {
-            host: Some("http://10.1.1.32:3000".into()),
-            repo: Some("ai/backend".into()),
+            remotes: vec![parse_remote("http://10.1.1.32:3000/git/ai/backend.git").unwrap()],
             branch: Some("feat/oauth".into()),
         };
         let ctx = info.to_context();
-        assert_eq!(ctx.host.as_deref(), Some("http://10.1.1.32:3000"));
-        assert_eq!(ctx.repo.as_deref(), Some("ai/backend"));
+        assert_eq!(ctx.api_base().as_deref(), Some("http://10.1.1.32:3000"));
+        assert_eq!(
+            ctx.repo_for(Some("10.1.1.32")).as_deref(),
+            Some("ai/backend")
+        );
+    }
+
+    #[test]
+    fn a_remote_for_another_host_contributes_no_repository() {
+        // The case this gate exists for: a GitHub checkout, a GitFox host.
+        // `haowei2000/gitfox-cli` is a real repository name that means nothing
+        // to the instance being asked.
+        let ctx = GitInfo {
+            remotes: vec![parse_remote("git@github.com:haowei2000/gitfox-cli.git").unwrap()],
+            branch: None,
+        }
+        .to_context();
+        assert_eq!(ctx.repo_for(Some("10.1.1.32")), None);
+        assert_eq!(ctx.api_base(), None);
+        // It is still the right answer for its own host.
+        assert_eq!(
+            ctx.repo_for(Some("github.com")).as_deref(),
+            Some("haowei2000/gitfox-cli")
+        );
+    }
+
+    #[test]
+    fn the_matching_remote_wins_even_when_it_is_not_first() {
+        // A checkout with several remotes, only one of which is GitFox.
+        let ctx = GitInfo {
+            remotes: vec![
+                parse_remote("ssh://aliyun3/srv/git/AgentNexus.git").unwrap(),
+                parse_remote("git@github.com:Grant-Huang/AgentNexus.git").unwrap(),
+                parse_remote("ssh://git@10.1.1.32:3322/ai-repos/GrantNexus.git").unwrap(),
+            ],
+            branch: None,
+        }
+        .to_context();
+        assert_eq!(
+            ctx.repo_for(Some("10.1.1.32")).as_deref(),
+            Some("ai-repos/GrantNexus")
+        );
+    }
+
+    #[test]
+    fn without_a_resolved_host_no_repository_is_inferred() {
+        let ctx = GitInfo {
+            remotes: vec![parse_remote("git@10.1.1.32:ai/backend.git").unwrap()],
+            branch: None,
+        }
+        .to_context();
+        // Nothing to compare against, so nothing is assumed.
+        assert_eq!(ctx.repo_for(None), None);
     }
 }

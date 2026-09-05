@@ -166,12 +166,15 @@ them. `error`, `failure` and `killed` are the ones fx treats as failed.
     { "stage": "build", "stage_number": 1,
       "step": "cargo test", "step_number": 2,
       "status": "failure", "exit_code": 101, "error": null,
+      "total_lines": 1658,
       "lines": ["error[E0308]: mismatched types", "error: aborting"] }
   ]
 }
 ```
 
-`lines` have their trailing newlines stripped. A step whose log could not be
+`total_lines` is what the step produced; `lines` is what came back after
+`--tail`. They differ only when `--tail` was given, so truncation is never
+silent. `lines` have their trailing newlines stripped. A step whose log could not be
 fetched still appears, with its status and exit code and an empty `lines`.
 
 A green run with `--failed` is **not** an error: `steps` is empty, `count` is

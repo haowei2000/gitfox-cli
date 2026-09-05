@@ -256,7 +256,8 @@ async fn logs(args: PipelineLogsArgs, ctx: &Context) -> Result<()> {
             status: step.status.as_str().to_string(),
             exit_code: step.exit_code,
             error: step.error.clone().filter(|e| !e.is_empty()),
-            lines,
+            total_lines: lines.len(),
+            lines: tail(lines, args.tail),
         });
     }
 
@@ -269,6 +270,19 @@ async fn logs(args: PipelineLogsArgs, ctx: &Context) -> Result<()> {
             steps,
         })
         .map_err(unexpected)
+}
+
+/// Keep only the last `n` lines, when asked.
+///
+/// A build's log is mostly progress output and the failure is at the end, so
+/// this is usually what a caller wants — but the count of what was dropped
+/// travels with it, because silently returning part of a log is how an agent
+/// concludes the wrong thing.
+fn tail(lines: Vec<LogLine>, n: Option<u32>) -> Vec<LogLine> {
+    match n {
+        Some(n) if lines.len() > n as usize => lines[lines.len() - n as usize..].to_vec(),
+        _ => lines,
+    }
 }
 
 /// Which steps to fetch.
@@ -557,6 +571,8 @@ struct StepLogs {
     status: String,
     exit_code: Option<i64>,
     error: Option<String>,
+    /// How many lines the step produced, before `--tail` trimmed anything.
+    total_lines: usize,
     lines: Vec<LogLine>,
 }
 
@@ -577,6 +593,7 @@ impl StepLogs {
             "status": self.status,
             "exit_code": self.exit_code,
             "error": self.error,
+            "total_lines": self.total_lines,
             "lines": self.text(),
         })
     }
@@ -637,6 +654,12 @@ impl Render for RunLogs {
                     block.push_str(&format!("\n{dim}  {error}{reset}"));
                 }
                 let text = step.text();
+                let omitted = step.total_lines.saturating_sub(text.len());
+                if omitted > 0 {
+                    block.push_str(&format!(
+                        "\n{dim}  … {omitted} earlier lines omitted{reset}"
+                    ));
+                }
                 if text.is_empty() {
                     block.push_str(&format!("\n{dim}  (no output){reset}"));
                 } else {
@@ -717,6 +740,7 @@ mod tests {
             pipeline: None,
             failed,
             step: step.map(str::to_string),
+            tail: None,
         }
     }
 
@@ -764,6 +788,7 @@ mod tests {
                 status: "failure".into(),
                 exit_code: Some(101),
                 error: None,
+                total_lines: 2,
                 lines: vec![
                     LogLine {
                         pos: 0,
@@ -786,6 +811,54 @@ mod tests {
         assert_eq!(value["steps"][0]["lines"][0], "error[E0308]");
         assert_eq!(value["steps"][0]["lines"][1], "aborting");
         assert_eq!(logs.to_jsonl().len(), 1);
+    }
+
+    fn line(text: &str) -> LogLine {
+        LogLine {
+            pos: 0,
+            out: text.to_string(),
+            time: 0,
+        }
+    }
+
+    #[test]
+    fn tail_keeps_the_end_where_the_failure_is() {
+        let lines: Vec<LogLine> = (1..=100).map(|i| line(&format!("line {i}"))).collect();
+        let kept = tail(lines.clone(), Some(3));
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept[0].out, "line 98");
+        assert_eq!(kept[2].out, "line 100");
+        // Asking for more than there is keeps everything.
+        assert_eq!(tail(lines.clone(), Some(500)).len(), 100);
+        assert_eq!(tail(lines, None).len(), 100);
+    }
+
+    #[test]
+    fn a_tailed_step_says_how_much_it_dropped() {
+        let logs = RunLogs {
+            pipeline: "default".into(),
+            run: 182,
+            status: "failure".into(),
+            only_failed: true,
+            steps: vec![StepLogs {
+                stage_name: "build".into(),
+                stage_number: 1,
+                step_name: "mvn deploy".into(),
+                step_number: 2,
+                status: "failure".into(),
+                exit_code: Some(1),
+                error: None,
+                total_lines: 1658,
+                lines: vec![line("BUILD FAILURE")],
+            }],
+        };
+        let value = logs.to_json();
+        // Both numbers travel, so truncation is never silent.
+        assert_eq!(value["steps"][0]["total_lines"], 1658);
+        assert_eq!(value["steps"][0]["lines"].as_array().unwrap().len(), 1);
+        let text = logs.to_human(false);
+        assert!(text.contains("1657 earlier lines omitted"), "{text}");
+        assert!(text.contains("BUILD FAILURE"), "{text}");
     }
 
     #[test]

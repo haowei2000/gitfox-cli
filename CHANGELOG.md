@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+* `fx pipeline logs --tail N` keeps the last N lines of each step, where a
+  build's failure actually is. Steps report `total_lines` alongside `lines`, so
+  a tailed response never hides that it was tailed.
+
+### Fixed
+
+* The git tier of the configuration chain now only speaks for remotes that
+  point at the resolved GitFox host. Running fx inside a checkout of another
+  host inferred that project's `owner/name` and asked GitFox about it,
+  producing a confident `REPO_NOT_FOUND` that read like a permissions problem.
+  All remotes are considered, not just the first, so a repository whose GitFox
+  remote is neither `origin` nor first still resolves.
+* Relative times print minutes as `3min ago` rather than `3m ago`, which sat
+  next to `3mo ago` in the same column.
+
 * `fx pr diff`, `fx pr checks` and `fx pr checkout`, completing the command
   surface — nothing answers `NOT_IMPLEMENTED` any more.
   * `pr diff` uses the endpoint's content negotiation: a raw unified diff for
