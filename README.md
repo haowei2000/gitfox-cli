@@ -74,7 +74,7 @@ cd ~/project
 fx pr list                       # open pull requests in this repository
 fx pr view                       # the one for the current branch
 fx pr create --fill              # title and body from the branch's commits
-fx pr merge --squash-ish -m squash
+fx pr merge -m squash            # merge it, squashed
 ```
 
 ```
