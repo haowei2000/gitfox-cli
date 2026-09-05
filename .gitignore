@@ -1,0 +1,11 @@
+/target/
+**/*.rs.bk
+*.pdb
+
+# fx writes here; never let a real one near the repo
+config.toml.local
+.env
+
+.DS_Store
+.idea/
+.vscode/
