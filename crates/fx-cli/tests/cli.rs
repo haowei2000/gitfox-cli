@@ -10,7 +10,7 @@ use std::process::Output;
 use assert_cmd::Command;
 use serde_json::{Value, json};
 use tempfile::TempDir;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// A `fx` invocation isolated from the developer's real environment: its own
@@ -32,6 +32,9 @@ fn fx(home: &Path) -> Command {
     }
     cmd.env("GITFOX_CONFIG", home.join("config.toml"));
     cmd.env("NO_COLOR", "1");
+    // Run outside any git checkout so the git tier of the chain stays empty
+    // unless a test sets one up on purpose.
+    cmd.current_dir(home);
     cmd
 }
 
@@ -131,16 +134,22 @@ fn an_unparseable_environment_variable_is_reported_not_ignored() {
 #[test]
 fn commands_still_on_the_roadmap_say_so_in_a_structured_way() {
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
-        .args(["--agent", "pr", "list"])
-        .output()
-        .unwrap();
-
-    assert_eq!(code(&output), 9);
-    let body = stdout_json(&output);
-    assert_eq!(body["error"]["code"], "NOT_IMPLEMENTED");
-    assert_eq!(body["error"]["details"]["command"], "fx pr list");
-    assert_eq!(body["error"]["details"]["planned_version"], "v0.3");
+    for (args, command, version) in [
+        (vec!["--agent", "repo", "list"], "fx repo list", "v0.2"),
+        (vec!["--agent", "pr", "diff"], "fx pr diff", "v0.5"),
+        (
+            vec!["--agent", "pipeline", "list"],
+            "fx pipeline list",
+            "v0.4",
+        ),
+    ] {
+        let output = fx(home.path()).args(&args).output().unwrap();
+        assert_eq!(code(&output), 9, "for {args:?}");
+        let body = stdout_json(&output);
+        assert_eq!(body["error"]["code"], "NOT_IMPLEMENTED");
+        assert_eq!(body["error"]["details"]["command"], command);
+        assert_eq!(body["error"]["details"]["planned_version"], version);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -454,4 +463,501 @@ fn a_missing_config_key_exits_with_the_not_found_code() {
         .unwrap();
     assert_eq!(code(&output), 4);
     assert_eq!(stdout_json(&output)["error"]["code"], "NOT_FOUND");
+}
+
+// ---------------------------------------------------------------------------
+// fx pr
+// ---------------------------------------------------------------------------
+
+/// One open pull request, as GitFox would return it.
+fn sample_pr(number: u64) -> Value {
+    json!({
+        "number": number,
+        "title": "feat: add OAuth",
+        "description": "Adds the callback route.",
+        "state": "open",
+        "is_draft": false,
+        "source_branch": "feat/oauth",
+        "target_branch": "main",
+        "author": { "id": 7, "uid": "whw", "display_name": "Haowei" },
+        "created": 1_756_000_000_000i64,
+        "updated": 1_756_000_000_000i64,
+        "web_url": "https://git.example.com/ai/backend/pulls/12",
+        "stats": { "commits": 3, "files_changed": 5, "additions": 120, "deletions": 8 }
+    })
+}
+
+/// The repo-scoped path, with `ai/backend` encoded as one segment. If fx ever
+/// stopped encoding the slash, none of these mocks would match.
+const PR_PATH: &str = "/api/v1/repos/ai%2Fbackend/pullreq";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_list_renders_a_table_for_humans_and_a_list_for_machines() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(PR_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([sample_pr(12)])))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let base = || {
+        let mut c = fx(home.path());
+        c.env("GITFOX_HOST", server.uri())
+            .env("GITFOX_TOKEN", "t")
+            .env("GITFOX_REPO", "ai/backend");
+        c
+    };
+
+    let human = base().args(["pr", "list"]).output().unwrap();
+    assert_eq!(code(&human), 0);
+    let text = String::from_utf8_lossy(&human.stdout);
+    assert!(text.contains("NUMBER"), "{text}");
+    assert!(text.contains("#12"), "{text}");
+    assert!(text.contains("feat/oauth → main"), "{text}");
+
+    let machine = base().args(["--agent", "pr", "list"]).output().unwrap();
+    let body = stdout_json(&machine);
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["data"]["repository"], "ai/backend");
+    assert_eq!(body["data"]["count"], 1);
+    assert_eq!(body["data"]["items"][0]["number"], 12);
+
+    let lines = base()
+        .args(["--output", "jsonl", "pr", "list"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&lines.stdout);
+    let rows: Vec<Value> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["number"], 12);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_list_state_filter_reaches_the_server() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(PR_PATH))
+        .and(query_param("state", "merged"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "list", "--state", "merged"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&output), 0);
+    assert_eq!(stdout_json(&output)["data"]["count"], 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_list_resolves_an_author_login_to_a_numeric_filter() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/principals"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 99, "uid": "whwilson", "display_name": "Someone Else" },
+            { "id": 7, "uid": "whw", "display_name": "Haowei" }
+        ])))
+        .mount(&server)
+        .await;
+    // An exact uid match must win over the first fuzzy hit.
+    Mock::given(method("GET"))
+        .and(path(PR_PATH))
+        .and(query_param("author_id", "7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([sample_pr(12)])))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "list", "--author", "whw"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(stdout_json(&output)["data"]["count"], 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_view_by_number_and_a_missing_one() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PR_PATH}/12")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(sample_pr(12)))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PR_PATH}/999")))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" })))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let found = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "view", "12"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&found), 0);
+    assert_eq!(stdout_json(&found)["data"]["title"], "feat: add OAuth");
+
+    let missing = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "view", "999"])
+        .output()
+        .unwrap();
+    // A missing pull request is more specific than a bare 404.
+    assert_eq!(code(&missing), 4);
+    assert_eq!(stdout_json(&missing)["error"]["code"], "PR_NOT_FOUND");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_create_sends_the_branches_and_returns_the_new_pull_request() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(PR_PATH))
+        .and(body_json(json!({
+            "title": "feat: add OAuth",
+            "description": "",
+            "source_branch": "feat/oauth",
+            "target_branch": "main",
+            "is_draft": false
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(sample_pr(12)))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args([
+            "--agent",
+            "pr",
+            "create",
+            "-B",
+            "main",
+            "-H",
+            "feat/oauth",
+            "-t",
+            "feat: add OAuth",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(stdout_json(&output)["data"]["number"], 12);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_create_takes_its_base_from_the_repository_default_branch() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/ai%2Fbackend"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({ "identifier": "backend", "default_branch": "trunk" })),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(PR_PATH))
+        .and(body_json(json!({
+            "title": "t",
+            "description": "",
+            "source_branch": "feat/oauth",
+            "target_branch": "trunk",
+            "is_draft": false
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(sample_pr(12)))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "create", "-H", "feat/oauth", "-t", "t"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn pr_create_without_a_title_fails_instead_of_prompting_a_machine() {
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", "https://git.example.com")
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "create", "-B", "main", "-H", "feat/oauth"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&output), 2);
+    assert_eq!(stdout_json(&output)["error"]["code"], "INVALID_ARGUMENT");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_merge_dry_run_reports_mergeability_without_merging() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PR_PATH}/12")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(sample_pr(12)))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("{PR_PATH}/12/merge")))
+        .and(body_json(json!({ "method": "squash", "dry_run": true })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({ "mergeable": true, "dry_run": true, "allowed_methods": ["merge", "squash"] }),
+        ))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "merge", "12", "-m", "squash", "--dry-run"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let data = &stdout_json(&output)["data"];
+    assert_eq!(data["merged"], false);
+    assert_eq!(data["mergeable"], true);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_merge_deletes_the_source_branch_with_a_second_request() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PR_PATH}/12")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(sample_pr(12)))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("{PR_PATH}/12/merge")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({ "sha": "0123456789abcdef", "branch_deleted": false })),
+        )
+        .mount(&server)
+        .await;
+    // GitFox has no delete-branch flag on merge; this must be its own call.
+    Mock::given(method("DELETE"))
+        .and(path(format!("{PR_PATH}/12/branch")))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "merge", "12", "--delete-branch"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let data = &stdout_json(&output)["data"];
+    assert_eq!(data["merged"], true);
+    assert_eq!(data["branch_deleted"], true);
+}
+
+// ---------------------------------------------------------------------------
+// git context
+// ---------------------------------------------------------------------------
+
+fn git(dir: &Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git should run");
+    assert!(
+        status.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn inside_a_checkout_the_repository_and_host_come_from_the_remote() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(PR_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([sample_pr(12)])))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let repo = home.path().join("checkout");
+    std::fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "feat/oauth"]);
+    // GitFox serves git under /git/<space>/<name>.git.
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            &format!("{}/git/ai/backend.git", server.uri()),
+        ],
+    );
+
+    // No -R, no GITFOX_REPO, no GITFOX_HOST: everything comes from the remote.
+    let mut cmd = fx(home.path());
+    cmd.current_dir(&repo)
+        .env("GITFOX_TOKEN", "t")
+        .args(["--agent", "pr", "list"]);
+    let output = cmd.output().unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(stdout_json(&output)["data"]["repository"], "ai/backend");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn with_no_number_the_current_branch_selects_the_pull_request() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(PR_PATH))
+        .and(query_param("source_branch", "feat/oauth"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([sample_pr(12)])))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let repo = home.path().join("checkout");
+    std::fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "feat/oauth"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            &format!("{}/git/ai/backend.git", server.uri()),
+        ],
+    );
+
+    let mut cmd = fx(home.path());
+    cmd.current_dir(&repo)
+        .env("GITFOX_TOKEN", "t")
+        .args(["--agent", "pr", "view"]);
+    let output = cmd.output().unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(stdout_json(&output)["data"]["number"], 12);
+}
+
+#[test]
+fn outside_a_checkout_a_repo_scoped_command_says_what_is_missing() {
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", "https://git.example.com")
+        .env("GITFOX_TOKEN", "t")
+        .args(["--agent", "pr", "list"])
+        .output()
+        .unwrap();
+    // 8 = git context error, distinct from "bad argument" or "not found".
+    assert_eq!(code(&output), 8);
+    assert_eq!(stdout_json(&output)["error"]["code"], "GIT_CONTEXT_ERROR");
+}
+
+#[test]
+fn a_malformed_repository_reference_is_an_argument_error() {
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", "https://git.example.com")
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "backend")
+        .args(["--agent", "pr", "list"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&output), 2);
+    assert_eq!(stdout_json(&output)["error"]["code"], "INVALID_ARGUMENT");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_404_on_the_repository_path_names_the_repository_not_a_pull_request() {
+    let server = MockServer::start().await;
+    // GitFox answers 404 for a repository that is missing *or* invisible.
+    Mock::given(method("GET"))
+        .and(path(PR_PATH))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "Not Found" })))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "list"])
+        .output()
+        .unwrap();
+
+    assert_eq!(code(&output), 4);
+    let error = &stdout_json(&output)["error"];
+    assert_eq!(error["code"], "REPO_NOT_FOUND");
+    assert!(
+        error["message"].as_str().unwrap().contains("ai/backend"),
+        "{error}"
+    );
 }

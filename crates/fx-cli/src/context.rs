@@ -9,6 +9,7 @@ use gitfox_client::GitFoxClient;
 use crate::cli::GlobalArgs;
 use crate::config::{self, ConfigFile, GitContext, Resolved, Secret, SystemEnv, TokenSource, Tty};
 use crate::error::{CliError, Result};
+use crate::git::{self, GitInfo};
 use crate::keychain;
 use crate::output::Renderer;
 
@@ -17,6 +18,9 @@ pub struct Context {
     pub config_file: ConfigFile,
     pub config_path: PathBuf,
     pub renderer: Renderer,
+    /// What the surrounding checkout said. Empty outside a git repository, and
+    /// empty when nothing needed it — see [`Context::build`].
+    pub git: GitInfo,
 }
 
 impl Context {
@@ -24,11 +28,20 @@ impl Context {
         let env = SystemEnv;
         let config_path = config::config_path(&env, global.config.as_deref())?;
         let config_file = ConfigFile::load(&config_path)?;
-        // Populated in v0.2 by inspecting the surrounding git checkout.
-        let git = GitContext::default();
+        let overrides = global.overrides();
+        let tty = Tty::detect();
 
+        // Resolve once without the checkout. The git tier is the last resort,
+        // so when the flags, environment and config file already answered, the
+        // `git` subprocesses are pure cost — and CI, which sets GITFOX_HOST and
+        // GITFOX_REPO, never pays it.
         let mut resolved =
-            config::resolve(&global.overrides(), &env, &config_file, &git, Tty::detect())?;
+            config::resolve(&overrides, &env, &config_file, &GitContext::default(), tty)?;
+        let mut git = GitInfo::default();
+        if resolved.host.is_none() || resolved.repo.is_none() {
+            git = git::detect();
+            resolved = config::resolve(&overrides, &env, &config_file, &git.to_context(), tty)?;
+        }
 
         // The keychain is the last tier of the token chain, and the only one
         // that needs I/O — hence here rather than inside `resolve`.
@@ -46,6 +59,7 @@ impl Context {
             config_file,
             config_path,
             renderer,
+            git,
         })
     }
 
@@ -77,6 +91,36 @@ impl Context {
             .insecure(self.config.insecure)
             .build()
             .map_err(CliError::from)
+    }
+
+    /// The repository the command should act on.
+    ///
+    /// Comes from `-R`, then `GITFOX_REPO`, then the checkout's remote — the
+    /// same chain as everything else, resolved in [`crate::config::resolve`].
+    pub fn repo(&self) -> Result<gitfox_client::RepoRef> {
+        let raw = self.config.repo.as_deref().ok_or_else(|| {
+            CliError::new(
+                crate::error::ErrorCode::GitContextError,
+                "no repository specified and none could be inferred from the current directory",
+            )
+            .with_hint("pass -R space/name, set GITFOX_REPO, or run fx from inside a checkout")
+        })?;
+        gitfox_client::RepoRef::parse(raw).map_err(|_| {
+            CliError::invalid_argument(format!(
+                "`{raw}` is not a repository reference; expected `space/name`"
+            ))
+        })
+    }
+
+    /// The checked-out branch, for commands that default to "the current one".
+    pub fn branch(&self) -> Result<&str> {
+        self.git.branch.as_deref().ok_or_else(|| {
+            CliError::new(
+                crate::error::ErrorCode::GitContextError,
+                "no branch checked out, or not inside a git repository",
+            )
+            .with_hint("pass the pull request number explicitly")
+        })
     }
 
     /// Fail instead of blocking when there is nobody at the keyboard.

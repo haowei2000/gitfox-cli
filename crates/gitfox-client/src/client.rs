@@ -8,9 +8,13 @@ use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use url::Url;
+use url::form_urlencoded;
 
 use crate::auth::AuthApi;
 use crate::error::{Error, Result};
+use crate::principal::PrincipalsApi;
+use crate::pull_request::PullRequestsApi;
+use crate::repo::ReposApi;
 
 pub use reqwest::Method;
 
@@ -59,6 +63,18 @@ impl GitFoxClient {
 
     pub fn auth(&self) -> AuthApi<'_> {
         AuthApi::new(self)
+    }
+
+    pub fn repos(&self) -> ReposApi<'_> {
+        ReposApi::new(self)
+    }
+
+    pub fn pull_requests(&self) -> PullRequestsApi<'_> {
+        PullRequestsApi::new(self)
+    }
+
+    pub fn principals(&self) -> PrincipalsApi<'_> {
+        PrincipalsApi::new(self)
     }
 
     /// Resolve an API path against the host.
@@ -264,6 +280,63 @@ pub fn normalize_host(host: &str) -> Result<Url> {
     Ok(url)
 }
 
+/// A percent-encoded query string.
+///
+/// Kept here rather than in each endpoint module so every request encodes the
+/// same way, and so `Option` parameters can be dropped without an `if` at each
+/// call site.
+#[derive(Debug, Default, Clone)]
+pub struct Query(Vec<(String, String)>);
+
+impl Query {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, key: &str, value: impl ToString) -> &mut Self {
+        self.0.push((key.to_string(), value.to_string()));
+        self
+    }
+
+    /// Append only when the value is present, so unset filters never reach the
+    /// server as empty strings (which GitFox treats as a real filter).
+    pub fn push_opt<T: ToString>(&mut self, key: &str, value: Option<T>) -> &mut Self {
+        if let Some(value) = value {
+            self.push(key, value);
+        }
+        self
+    }
+
+    pub fn extend<T: ToString>(
+        &mut self,
+        key: &str,
+        values: impl IntoIterator<Item = T>,
+    ) -> &mut Self {
+        for value in values {
+            self.push(key, value);
+        }
+        self
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn encode(&self) -> String {
+        form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(self.0.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+            .finish()
+    }
+
+    /// `path?a=1&b=2`, or `path` when there is nothing to add.
+    pub fn apply(&self, path: &str) -> String {
+        if self.is_empty() {
+            return path.to_string();
+        }
+        format!("{path}?{}", self.encode())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,6 +397,53 @@ mod tests {
             c.resolve("/api/v1/user").unwrap().as_str(),
             "https://example.com/gitfox/api/v1/user"
         );
+    }
+
+    #[test]
+    fn resolve_preserves_a_percent_encoded_slash_in_a_repo_ref() {
+        // `ai/backend` travels as one path segment, `ai%2Fbackend`. If `join`
+        // ever decoded or double-encoded it, every repo-scoped call would 404.
+        let c = GitFoxClient::builder("https://git.example.com")
+            .build()
+            .unwrap();
+        let url = c.resolve("/api/v1/repos/ai%2Fbackend/pullreq").unwrap();
+        assert_eq!(
+            url.as_str(),
+            "https://git.example.com/api/v1/repos/ai%2Fbackend/pullreq"
+        );
+    }
+
+    #[test]
+    fn resolve_keeps_a_query_string_intact() {
+        let c = GitFoxClient::builder("https://git.example.com")
+            .build()
+            .unwrap();
+        let url = c
+            .resolve("/api/v1/repos/ai%2Fbackend/pullreq?state=open&limit=30")
+            .unwrap();
+        assert_eq!(url.query(), Some("state=open&limit=30"));
+        assert_eq!(url.path(), "/api/v1/repos/ai%2Fbackend/pullreq");
+    }
+
+    #[test]
+    fn query_encodes_pairs_and_skips_absent_values() {
+        let mut q = Query::new();
+        q.push("limit", 30)
+            .push_opt("author_id", Some(7))
+            .push_opt::<String>("query", None)
+            .extend("state", ["open", "merged"]);
+        assert_eq!(
+            q.apply("/x"),
+            "/x?limit=30&author_id=7&state=open&state=merged"
+        );
+        assert_eq!(Query::new().apply("/x"), "/x");
+    }
+
+    #[test]
+    fn query_escapes_values_that_would_break_the_url() {
+        let mut q = Query::new();
+        q.push("query", "fix: auth & tokens");
+        assert_eq!(q.encode(), "query=fix%3A+auth+%26+tokens");
     }
 
     #[test]

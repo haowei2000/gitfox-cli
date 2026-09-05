@@ -8,6 +8,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+* `fx pr list | view | create | merge`, against endpoints verified from the
+  instance's own `/openapi.yaml` (GitFox API v1.3.0).
+  * `fx pr view` and `fx pr merge` take no number inside a checkout: the current
+    branch selects the pull request.
+  * `fx pr create` defaults its base to the repository's default branch and its
+    head to the current branch; `--fill` writes the title and body from the
+    branch's commits.
+  * `fx pr merge --dry-run` reports whether the merge would succeed.
+    `--delete-branch` is a second request, because GitFox has no flag for it on
+    merge.
+  * `fx pr list --author` accepts a login and resolves it to the numeric
+    principal id the API filters on.
+* Git context detection (`crates/fx-cli/src/git.rs`): the repository, and for
+  HTTP remotes the API host, are read from the git remote — the bottom tier of
+  the configuration chain. It runs only when the flags, environment and config
+  file left something unresolved.
+* `REPO_NOT_FOUND` and `PR_NOT_FOUND` are now raised where a bare 404 would have
+  been, so a caller can tell a missing repository from a missing pull request.
+
 * `gitfox-client` — the GitFox API client: base URL normalisation, bearer auth,
   typed errors, `GET /api/v1/user`, and one generic request path used by `fx api`.
 * `fx api` — send any method to any endpoint, with `--field` / `--raw-field` /

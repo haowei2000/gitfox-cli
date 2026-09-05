@@ -14,6 +14,7 @@ mod commands;
 mod config;
 mod context;
 mod error;
+mod git;
 mod keychain;
 mod output;
 

@@ -23,11 +23,15 @@ machine never has to parse prose:
 
 ## Status
 
-**v0.1 — foundation.** Configuration, the API client, `fx api`, `fx auth`,
-`fx config`, the output system and the error/exit-code contract are done and
-tested. `fx repo`, `fx pr` and `fx pipeline` exist in the command tree and
-return a structured `NOT_IMPLEMENTED` error naming the version they land in —
-see the [roadmap](#roadmap). Until then `fx api` reaches every endpoint.
+**v0.3 — pull requests work.** `fx pr list|view|create|merge` are implemented
+against a verified GitFox API v1.3.0, on top of the v0.1 foundation
+(configuration chain, client, `fx api`, `fx auth`, `fx config`, output system,
+error and exit-code contract) and git remote detection pulled forward from v0.2.
+
+Still on the roadmap: `fx repo list|view|clone` (v0.2), `fx pipeline` (v0.4),
+and `fx pr checkout|diff|checks` (v0.5). Each returns a structured
+`NOT_IMPLEMENTED` error naming its version, and `fx api` reaches every endpoint
+in the meantime.
 
 ## Install
 
@@ -59,6 +63,40 @@ Or log in interactively and let the token live in the OS keychain:
 ```bash
 fx auth login --hostname git.example.com
 ```
+
+## Pull requests
+
+Inside a checkout, nothing needs to be spelled out — the repository comes from
+the git remote and the pull request from the branch you are on:
+
+```bash
+cd ~/project
+fx pr list                       # open pull requests in this repository
+fx pr view                       # the one for the current branch
+fx pr create --fill              # title and body from the branch's commits
+fx pr merge --squash-ish -m squash
+```
+
+```
+NUMBER  TITLE            STATE  BRANCHES           AUTHOR  UPDATED
+#12     feat: add OAuth  open   feat/oauth → main  whw     3d ago
+```
+
+Explicitly, for CI and agents:
+
+```bash
+fx --agent pr list -R ai/backend --state all --limit 50
+fx --agent pr view 12
+fx --agent pr create -B main -H feat/oauth -t "feat: add OAuth" -b "Closes #4"
+fx --agent pr merge 12 -m squash --delete-branch
+```
+
+Two flags worth knowing:
+
+* `fx pr merge --dry-run` answers "would this merge?" without merging, which is
+  the question an agent actually wants before it does anything.
+* `fx pr list --author whw` takes a login. GitFox filters by numeric principal
+  id, so fx resolves the name for you.
 
 ## `fx api` — the escape hatch
 
@@ -183,13 +221,14 @@ crates/
 │   ├── client.rs     the one place a request is issued
 │   ├── error.rs      typed API errors
 │   ├── models/       domain models, deliberately not the raw API DTOs
-│   └── auth.rs · repo.rs · pull_request.rs · pipeline.rs
+│   └── auth.rs · repo.rs · pull_request.rs · principal.rs · pipeline.rs
 └── fx-cli/           the binary
     ├── cli.rs        the clap command tree
     ├── config.rs     the precedence chain (pure, heavily tested)
     ├── context.rs    resolved config + renderer + client
     ├── output.rs     Render trait, envelopes, tables
     ├── error.rs      stable error codes and exit codes
+    ├── git.rs        what the surrounding checkout says
     ├── keychain.rs   OS keychain access
     └── commands/     one module per command
 ```
@@ -206,8 +245,8 @@ Two rules keep this from rotting:
 | Version | Scope |
 |---|---|
 | **v0.1** ✅ | workspace, client, config chain, env vars, auth, `fx api`, JSON output, error model |
-| v0.2 | `repo list/view/clone`, git remote detection, `-R`, multi-host |
-| v0.3 | `pr list/view/create/merge` — the first genuinely daily-usable release |
+| v0.2 ◐ | git remote detection and `-R` ✅; `repo list/view/clone` still to come |
+| **v0.3** ✅ | `pr list/view/create/merge` — the first genuinely daily-usable release |
 | v0.4 | `pipeline list/view/logs/retry`, including `logs --failed` |
 | v0.5 | `pr checkout/diff/checks`, `pr create --fill`, shell completion, nicer tables |
 | v0.6 | agent hardening: pagination, retries, non-interactive edges, schema freeze |
@@ -216,6 +255,14 @@ Two rules keep this from rotting:
 
 The twelve commands v0.1–v0.4 aim to make rock solid: `auth login/logout/status`,
 `api`, `repo list/view`, `pr list/view/create/merge`, `pipeline list/logs`.
+Nine are done.
+
+### Where the endpoints come from
+
+Every GitFox instance serves its own OpenAPI document at `/openapi.yaml`,
+unauthenticated. The endpoints, parameter names and response shapes this CLI
+targets were read from there rather than guessed, and the module docs in
+`crates/gitfox-client/src/` record which version they were checked against.
 
 ## Development
 

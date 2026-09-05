@@ -23,9 +23,16 @@ pub mod client;
 pub mod error;
 pub mod models;
 pub mod pipeline;
+pub mod principal;
 pub mod pull_request;
 pub mod repo;
 
-pub use client::{DEFAULT_TIMEOUT_SECS, GitFoxClient, GitFoxClientBuilder, Method, RawResponse};
+pub use client::{
+    DEFAULT_TIMEOUT_SECS, GitFoxClient, GitFoxClientBuilder, Method, Query, RawResponse,
+};
 pub use error::{Error, Result};
-pub use models::{RepoRef, User};
+pub use models::{
+    CreatePullRequest, MergeMethod, MergePullRequest, MergeResult, Principal, PullRequest,
+    PullRequestState, PullRequestStats, RepoRef, Repository, User,
+};
+pub use pull_request::PullRequestFilter;

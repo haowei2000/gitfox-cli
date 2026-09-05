@@ -319,6 +319,20 @@ pub enum PrState {
     All,
 }
 
+impl PrState {
+    /// `all` is a CLI convenience: the API takes a repeatable `state` filter,
+    /// so it expands rather than being sent as a value.
+    pub fn expand(self) -> Vec<gitfox_client::PullRequestState> {
+        use gitfox_client::PullRequestState as S;
+        match self {
+            Self::Open => vec![S::Open],
+            Self::Closed => vec![S::Closed],
+            Self::Merged => vec![S::Merged],
+            Self::All => vec![S::Open, S::Closed, S::Merged],
+        }
+    }
+}
+
 #[derive(Debug, Args)]
 pub struct PrListArgs {
     /// Filter by state
@@ -369,12 +383,23 @@ pub struct PrCreateArgs {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-#[value(rename_all = "lower")]
+#[value(rename_all = "kebab-case")]
 pub enum MergeMethod {
     Merge,
     Squash,
     Rebase,
     FastForward,
+}
+
+impl From<MergeMethod> for gitfox_client::MergeMethod {
+    fn from(value: MergeMethod) -> Self {
+        match value {
+            MergeMethod::Merge => Self::Merge,
+            MergeMethod::Squash => Self::Squash,
+            MergeMethod::Rebase => Self::Rebase,
+            MergeMethod::FastForward => Self::FastForward,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -390,6 +415,10 @@ pub struct PrMergeArgs {
     /// Delete the source branch after merging
     #[arg(short = 'D', long)]
     pub delete_branch: bool,
+
+    /// Report whether the merge would succeed, without performing it
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -573,6 +602,31 @@ mod tests {
         assert!(
             Cli::try_parse_from(["fx", "api", "POST", "/x", "--body", "{}", "--input", "-"])
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn fast_forward_keeps_its_hyphen_on_the_command_line() {
+        let cli = Cli::try_parse_from(["fx", "pr", "merge", "12", "-m", "fast-forward"]).unwrap();
+        let Command::Pr(cmd) = cli.command else {
+            panic!("expected pr")
+        };
+        let PrSubcommand::Merge(args) = cmd.command else {
+            panic!("expected merge")
+        };
+        assert_eq!(args.method, MergeMethod::FastForward);
+        assert_eq!(
+            gitfox_client::MergeMethod::from(args.method).as_str(),
+            "fast-forward"
+        );
+    }
+
+    #[test]
+    fn state_all_expands_to_every_state() {
+        assert_eq!(PrState::All.expand().len(), 3);
+        assert_eq!(
+            PrState::Open.expand(),
+            vec![gitfox_client::PullRequestState::Open]
         );
     }
 

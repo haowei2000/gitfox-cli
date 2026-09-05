@@ -182,6 +182,38 @@ pub fn plain_table(headers: &[&str], rows: &[Vec<String>]) -> String {
         .join("\n")
 }
 
+/// A short "3d ago" for a GitFox timestamp.
+///
+/// GitFox sends epoch integers without saying which unit, and instances differ.
+/// Anything past roughly the year 5138 in seconds must actually be
+/// milliseconds, which separates the two cleanly for any date this tool will
+/// ever see. The raw value is what goes into JSON; this is for humans only.
+pub fn relative_time(epoch: i64) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let seconds = if epoch.abs() > 100_000_000_000 {
+        epoch / 1000
+    } else {
+        epoch
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let delta = now - seconds;
+    if delta < 0 {
+        return "in the future".to_string();
+    }
+    match delta {
+        d if d < 60 => "just now".to_string(),
+        d if d < 3600 => format!("{}m ago", d / 60),
+        d if d < 86_400 => format!("{}h ago", d / 3600),
+        d if d < 2_592_000 => format!("{}d ago", d / 86_400),
+        d if d < 31_536_000 => format!("{}mo ago", d / 2_592_000),
+        d => format!("{}y ago", d / 31_536_000),
+    }
+}
+
 /// Aligned `key: value` lines, for single-record views like `fx auth status`.
 pub fn key_values(pairs: &[(&str, String)]) -> String {
     let width = pairs.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
@@ -246,6 +278,21 @@ mod tests {
         assert!(lines[0].contains("REPOSITORY"), "{text}");
         assert!(!text.contains('|'), "{text}");
         assert!(lines[1].contains("ai/backend"), "{text}");
+    }
+
+    #[test]
+    fn relative_time_reads_both_seconds_and_milliseconds() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let three_days = now - 3 * 86_400;
+        assert_eq!(relative_time(three_days), "3d ago");
+        // The same instant expressed in milliseconds must read the same.
+        assert_eq!(relative_time(three_days * 1000), "3d ago");
+        assert_eq!(relative_time(now), "just now");
+        assert_eq!(relative_time(now - 7200), "2h ago");
     }
 
     #[test]
