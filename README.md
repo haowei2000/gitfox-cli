@@ -23,14 +23,14 @@ machine never has to parse prose:
 
 ## Status
 
-**v0.4 — the twelve core commands are done.** `repo`, `pr` and `pipeline` are
-all implemented against a verified GitFox API v1.3.0, on the v0.1 foundation:
-the configuration chain, the client, `fx api`, `fx auth`, `fx config`, the
-output system, and the error and exit-code contract.
+**v0.6 — the machine interface is hardened.** The twelve core commands are
+implemented against a verified GitFox API v1.3.0, lists page transparently and
+say when they were truncated, transient failures are retried, and the JSON
+contract is written down in [docs/json-schema.md](docs/json-schema.md).
 
-Still on the roadmap: `fx pr checkout|diff|checks` (v0.5), then agent hardening
-(v0.6) and MCP (v0.7). The three v0.5 commands return a structured
-`NOT_IMPLEMENTED` error, and `fx api` reaches every endpoint in the meantime.
+Still on the roadmap: `fx pr checkout|diff|checks` and shell completion (v0.5),
+then MCP (v0.7). Those three commands return a structured `NOT_IMPLEMENTED`
+error, and `fx api` reaches every endpoint in the meantime.
 
 ## Install
 
@@ -192,6 +192,7 @@ CLI flag  >  environment variable  >  config file  >  git context  >  default
 | `GITFOX_OUTPUT` | `table`, `json` or `jsonl` |
 | `GITFOX_CONFIG` | Path to the config file |
 | `GITFOX_TIMEOUT` | HTTP timeout in seconds (default `30`) |
+| `GITFOX_RETRIES` | Retries for transient failures (default `2`) |
 | `GITFOX_INSECURE` | Skip TLS verification — warns loudly when it does |
 | `GITFOX_AGENT` | Turn on agent mode |
 | `NO_COLOR` | Standard opt-out, honoured alongside `--no-color` |
@@ -228,6 +229,9 @@ Tokens are never written here. `fx config set` cannot even address a token key.
 
 ## Output
 
+The full contract — every command's `data` shape — is in
+[docs/json-schema.md](docs/json-schema.md).
+
 | Format | Success | Failure |
 |---|---|---|
 | `table` (default) | human text on stdout | message on **stderr** |
@@ -236,6 +240,31 @@ Tokens are never written here. `fx config set` cannot even address a token key.
 
 In machine modes the whole contract is: stdout is one JSON document, and the
 exit code says whether it is a result or an error.
+
+### Lists never lie about being complete
+
+Every list carries `count` and `truncated`:
+
+```json
+{ "ok": true, "data": { "count": 30, "truncated": true, "items": [ … ] } }
+```
+
+GitFox publishes no pagination headers, so fx asks for one row more than you
+requested — receiving it is proof there are more. `truncated` is therefore an
+observation, not a guess. Raise `--limit` and fx walks the pages for you, at up
+to 100 rows per request.
+
+### Transient failures are retried
+
+Network errors, timeouts, `429`, `502`, `503` and `504` are retried with
+exponential backoff (`--retries`, `GITFOX_RETRIES`, default 2). A server's
+`Retry-After` is honoured up to five seconds.
+
+`POST` and `PATCH` are **never** retried. A retried `POST /pullreq` that timed
+out after the server accepted it would open a second pull request; reporting
+that something might not have happened beats silently doing it twice. `500` is
+not retried either — an internal error that repeats is usually a bug being hit
+again, not a blip.
 
 ## Exit codes
 
@@ -253,6 +282,7 @@ exit code says whether it is a result or an error.
 | `9` | not implemented yet |
 
 Full table with the matching `error.code` strings: [docs/exit-codes.md](docs/exit-codes.md).
+The JSON each command returns: [docs/json-schema.md](docs/json-schema.md).
 
 ## Architecture
 
@@ -287,6 +317,7 @@ crates/
     ├── error.rs      stable error codes and exit codes
     ├── git.rs        what the surrounding checkout says
     ├── keychain.rs   OS keychain access
+    ├── paginate.rs   walking page/limit endpoints
     └── commands/     one module per command
 ```
 
@@ -305,8 +336,8 @@ Two rules keep this from rotting:
 | **v0.2** ✅ | `repo list/view/clone`, git remote detection, `-R`, multi-host |
 | **v0.3** ✅ | `pr list/view/create/merge` — the first genuinely daily-usable release |
 | **v0.4** ✅ | `pipeline list/view/logs/run/retry`, including `logs --failed` |
-| v0.5 | `pr checkout/diff/checks`, `pr create --fill`, shell completion, nicer tables |
-| v0.6 | agent hardening: pagination, retries, non-interactive edges, schema freeze |
+| v0.5 ◐ | `pr create --fill` ✅; `pr checkout/diff/checks` and shell completion to come |
+| **v0.6** ✅ | agent hardening: pagination, retries, non-interactive edges, schema freeze |
 | v0.7 | `fx-mcp`, reusing `gitfox-client` directly |
 | v1.0 | CLI syntax, JSON schema, config format and exit codes all stable |
 

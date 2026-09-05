@@ -28,7 +28,8 @@ pub mod pull_request;
 pub mod repo;
 
 pub use client::{
-    DEFAULT_TIMEOUT_SECS, GitFoxClient, GitFoxClientBuilder, Method, Query, RawResponse,
+    DEFAULT_RETRIES, DEFAULT_TIMEOUT_SECS, GitFoxClient, GitFoxClientBuilder, Method, Query,
+    RawResponse, is_retryable_method,
 };
 pub use error::{Error, Result};
 pub use models::{

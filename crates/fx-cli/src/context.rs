@@ -88,6 +88,7 @@ impl Context {
         GitFoxClient::builder(host)
             .token(token.map(|t| t.expose().to_string()))
             .timeout_secs(self.config.timeout_secs)
+            .retries(self.config.retries)
             .insecure(self.config.insecure)
             .build()
             .map_err(CliError::from)

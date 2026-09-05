@@ -17,6 +17,7 @@ mod error;
 mod git;
 mod keychain;
 mod output;
+mod paginate;
 
 use std::process::ExitCode;
 

@@ -34,6 +34,7 @@ new codes may be added, existing ones are never renumbered or renamed.
 | `API_ERROR` | 5 | any other non-success HTTP status, or an undecodable body |
 | `NETWORK_ERROR` | 6 | DNS, TLS or connection failure |
 | `TIMEOUT` | 6 | the request exceeded `--timeout` / `GITFOX_TIMEOUT` |
+| `RATE_LIMITED` | 6 | the server answered 429; `details.retry_after_secs` when it said |
 | `CONFIG_ERROR` | 7 | missing host, unreadable config, bad environment value |
 | `GIT_CONTEXT_ERROR` | 8 | the current directory is not a usable GitFox checkout |
 | `NOT_IMPLEMENTED` | 9 | the command is on the roadmap; `details.planned_version` says when |

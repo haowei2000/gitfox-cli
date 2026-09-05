@@ -2,7 +2,7 @@
 //! go through.
 
 use std::fmt;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use serde::de::DeserializeOwned;
@@ -21,6 +21,18 @@ pub use reqwest::Method;
 
 pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
+/// Attempts after the first, for requests that are safe to repeat.
+pub const DEFAULT_RETRIES: u32 = 2;
+
+/// The longest we will wait between attempts, including a server's own
+/// `Retry-After`.
+///
+/// Someone is usually watching a CLI run. A command that goes silent for
+/// minutes because a header asked it to is worse than one that gives up and
+/// says why — the caller can always run it again, and an agent can back off on
+/// its own schedule.
+const MAX_BACKOFF: Duration = Duration::from_secs(5);
+
 const USER_AGENT: &str = concat!("fx/", env!("CARGO_PKG_VERSION"));
 
 /// A GitFox API client bound to one host.
@@ -29,6 +41,7 @@ pub struct GitFoxClient {
     base_url: Url,
     token: Option<String>,
     timeout_secs: u64,
+    retries: u32,
     http: reqwest::Client,
 }
 
@@ -40,6 +53,7 @@ impl fmt::Debug for GitFoxClient {
             .field("base_url", &self.base_url.as_str())
             .field("token", &self.token.as_ref().map(|_| "***"))
             .field("timeout_secs", &self.timeout_secs)
+            .field("retries", &self.retries)
             .finish()
     }
 }
@@ -50,6 +64,7 @@ impl GitFoxClient {
             host: host.into(),
             token: None,
             timeout_secs: DEFAULT_TIMEOUT_SECS,
+            retries: DEFAULT_RETRIES,
             insecure: false,
         }
     }
@@ -96,6 +111,9 @@ impl GitFoxClient {
     }
 
     /// The one place an HTTP request is issued. Everything typed is built on top.
+    ///
+    /// Transient failures are retried with exponential backoff — but only for
+    /// methods that are safe to repeat. See [`is_retryable_method`].
     pub async fn request(
         &self,
         method: Method,
@@ -104,8 +122,47 @@ impl GitFoxClient {
         extra_headers: &[(String, String)],
     ) -> Result<RawResponse> {
         let url = self.resolve(path)?;
-        tracing::debug!(method = %method, url = %url, "gitfox request");
+        let budget = if is_retryable_method(&method) {
+            self.retries
+        } else {
+            0
+        };
 
+        let mut attempt = 0;
+        loop {
+            tracing::debug!(method = %method, url = %url, attempt, "gitfox request");
+            let outcome = self
+                .attempt(method.clone(), url.clone(), body, extra_headers)
+                .await;
+
+            let Err(error) = outcome else {
+                return outcome;
+            };
+
+            let Some(delay) = self.backoff(&error, attempt, budget) else {
+                return Err(error);
+            };
+            tracing::warn!(
+                method = %method,
+                url = %url,
+                attempt,
+                delay_ms = delay.as_millis(),
+                error = %error,
+                "transient failure; retrying"
+            );
+            tokio::time::sleep(delay).await;
+            attempt += 1;
+        }
+    }
+
+    /// One trip to the server, with no retry logic of its own.
+    async fn attempt(
+        &self,
+        method: Method,
+        url: Url,
+        body: Option<&Value>,
+        extra_headers: &[(String, String)],
+    ) -> Result<RawResponse> {
         let mut req = self
             .http
             .request(method, url)
@@ -113,6 +170,8 @@ impl GitFoxClient {
         if let Some(token) = &self.token {
             let mut value = HeaderValue::from_str(&format!("Bearer {token}"))
                 .map_err(|_| Error::Builder("token contains invalid header bytes".into()))?;
+            // Marks the header sensitive so it stays out of any logging that
+            // honours the flag.
             value.set_sensitive(true);
             req = req.header(AUTHORIZATION, value);
         }
@@ -154,6 +213,24 @@ impl GitFoxClient {
         }
     }
 
+    /// How long to wait before trying again, or `None` to give up.
+    ///
+    /// A server that said `Retry-After` is obeyed up to [`MAX_BACKOFF`];
+    /// otherwise the delay doubles each attempt from 250ms, with jitter so a
+    /// fleet of agents retrying at once does not do so in lockstep.
+    fn backoff(&self, error: &Error, attempt: u32, budget: u32) -> Option<Duration> {
+        if attempt >= budget || !is_transient(error) {
+            return None;
+        }
+        if let Error::RateLimited { retry_after, .. } = error
+            && let Some(secs) = retry_after
+        {
+            return Some(Duration::from_secs(*secs).min(MAX_BACKOFF));
+        }
+        let base = Duration::from_millis(250 * 2u64.pow(attempt.min(6)));
+        Some((base + jitter(base)).min(MAX_BACKOFF))
+    }
+
     /// Convenience wrapper for typed GET requests.
     pub async fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         self.request(Method::GET, path, None, &[])
@@ -179,6 +256,14 @@ impl GitFoxClient {
         };
         let message = Error::message_from_body(&raw.json, &fallback);
         match raw.status {
+            429 => Error::RateLimited {
+                retry_after: raw
+                    .headers
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.trim().parse::<u64>().ok()),
+                message,
+            },
             401 if self.token.is_none() => Error::AuthRequired,
             401 | 403 => Error::AuthFailed,
             404 => Error::NotFound {
@@ -223,6 +308,7 @@ pub struct GitFoxClientBuilder {
     host: String,
     token: Option<String>,
     timeout_secs: u64,
+    retries: u32,
     insecure: bool,
 }
 
@@ -234,6 +320,13 @@ impl GitFoxClientBuilder {
 
     pub fn timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
+        self
+    }
+
+    /// How many times to try again after a transient failure. Zero disables
+    /// retrying entirely.
+    pub fn retries(mut self, retries: u32) -> Self {
+        self.retries = retries;
         self
     }
 
@@ -256,6 +349,7 @@ impl GitFoxClientBuilder {
             base_url,
             token: self.token,
             timeout_secs: self.timeout_secs,
+            retries: self.retries,
             http,
         })
     }
@@ -283,6 +377,43 @@ pub fn normalize_host(host: &str) -> Result<Url> {
         url.set_path(&path);
     }
     Ok(url)
+}
+
+/// Whether repeating this method is safe.
+///
+/// `POST` is excluded on purpose. A retried `POST /pullreq` that timed out
+/// after the server accepted it would open a second pull request — silently
+/// doing the thing twice is worse than reporting that it might not have
+/// happened at all. `PATCH` is excluded for the same reason: GitFox uses it for
+/// partial updates, which are not guaranteed idempotent.
+pub fn is_retryable_method(method: &Method) -> bool {
+    matches!(
+        *method,
+        Method::GET | Method::HEAD | Method::OPTIONS | Method::PUT | Method::DELETE
+    )
+}
+
+/// Whether this failure is worth another try.
+///
+/// Deliberately narrow: a 500 is not here, because an internal error that
+/// repeats is usually a bug being hit again rather than a blip, and retrying it
+/// just triples the time before the user sees the message.
+fn is_transient(error: &Error) -> bool {
+    match error {
+        Error::Network(_) | Error::Timeout(_) | Error::RateLimited { .. } => true,
+        Error::Api { status, .. } => matches!(status, 502..=504),
+        _ => false,
+    }
+}
+
+/// Up to half the base delay, derived from the clock rather than a PRNG so the
+/// crate keeps no random-number dependency.
+fn jitter(base: Duration) -> Duration {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64)
+        .unwrap_or(0);
+    Duration::from_millis((base.as_millis() as u64 / 2).saturating_mul(nanos % 1000) / 1000)
 }
 
 /// A percent-encoded query string.

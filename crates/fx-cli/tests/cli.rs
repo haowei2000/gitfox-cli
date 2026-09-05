@@ -1588,3 +1588,232 @@ async fn a_repository_with_no_clone_url_fails_before_running_git() {
     assert_eq!(code(&output), 5);
     assert_eq!(stdout_json(&output)["error"]["code"], "API_ERROR");
 }
+
+// ---------------------------------------------------------------------------
+// pagination
+// ---------------------------------------------------------------------------
+
+/// Mount `total` pull requests behind a page/limit endpoint, one mock per page.
+async fn mount_paged_pull_requests(server: &MockServer, total: u64, page_size: u64) {
+    let pages = total.div_ceil(page_size).max(1);
+    for page in 1..=pages {
+        let start = (page - 1) * page_size + 1;
+        let end = (start + page_size - 1).min(total);
+        let items: Vec<Value> = (start..=end).map(sample_pr).collect();
+        Mock::given(method("GET"))
+            .and(path(PR_PATH))
+            .and(query_param("page", page.to_string()))
+            .and(query_param("limit", page_size.to_string()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(items))
+            .mount(server)
+            .await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_list_that_fits_in_one_page_is_not_marked_truncated() {
+    let server = MockServer::start().await;
+    // --limit 30 asks for 31; only 12 exist, so that is all of them.
+    mount_paged_pull_requests(&server, 12, 31).await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "list"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let data = &stdout_json(&output)["data"];
+    assert_eq!(data["count"], 12);
+    assert_eq!(data["truncated"], false);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn more_results_than_the_limit_are_reported_as_truncated() {
+    let server = MockServer::start().await;
+    // 31 exist and 31 were asked for, which is how fx learns there are more.
+    mount_paged_pull_requests(&server, 31, 31).await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "list"])
+        .output()
+        .unwrap();
+
+    let data = &stdout_json(&output)["data"];
+    assert_eq!(data["count"], 30, "the extra one is not handed back");
+    assert_eq!(data["truncated"], true);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_limit_beyond_one_page_walks_pages_and_returns_them_in_order() {
+    let server = MockServer::start().await;
+    // 250 available; --limit 150 needs two pages of the server maximum.
+    mount_paged_pull_requests(&server, 250, 100).await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "list", "--limit", "150"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let data = &stdout_json(&output)["data"];
+    assert_eq!(data["count"], 150);
+    assert_eq!(data["truncated"], true);
+    // The right rows, in the right order: a shrinking last page would have
+    // read from the wrong offset and produced low numbers here.
+    let items = data["items"].as_array().unwrap();
+    assert_eq!(items[0]["number"], 1);
+    assert_eq!(items[99]["number"], 100);
+    assert_eq!(items[100]["number"], 101);
+    assert_eq!(items[149]["number"], 150);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn paging_stops_when_the_collection_runs_out() {
+    let server = MockServer::start().await;
+    // 150 available, 500 asked for: page 2 comes back short and that is the end.
+    mount_paged_pull_requests(&server, 150, 100).await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "pr", "list", "--limit", "500"])
+        .output()
+        .unwrap();
+
+    let data = &stdout_json(&output)["data"];
+    assert_eq!(data["count"], 150);
+    assert_eq!(data["truncated"], false);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_human_is_told_when_a_table_is_not_the_whole_story() {
+    let server = MockServer::start().await;
+    mount_paged_pull_requests(&server, 31, 31).await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["pr", "list"])
+        .output()
+        .unwrap();
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("raise --limit"), "{text}");
+}
+
+// ---------------------------------------------------------------------------
+// retries, through the binary
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transient_failure_is_retried_without_the_caller_seeing_it() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/user"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/user"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "uid": "whw" })))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .args(["--agent", "api", "GET", "/api/v1/user"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(stdout_json(&output)["data"]["uid"], "whw");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retries_zero_surfaces_the_first_failure() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/user"))
+        .respond_with(ResponseTemplate::new(503).set_body_json(json!({ "message": "down" })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_RETRIES", "0")
+        .args(["--agent", "api", "GET", "/api/v1/user"])
+        .output()
+        .unwrap();
+
+    assert_eq!(code(&output), 5);
+    assert_eq!(stdout_json(&output)["error"]["code"], "API_ERROR");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rate_limiting_has_its_own_code_and_reports_the_servers_delay() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/user"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("retry-after", "12")
+                .set_body_json(json!({ "message": "slow down" })),
+        )
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_RETRIES", "0")
+        .args(["--agent", "api", "GET", "/api/v1/user"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        code(&output),
+        6,
+        "transient, so the same class as a network error"
+    );
+    let error = &stdout_json(&output)["error"];
+    assert_eq!(error["code"], "RATE_LIMITED");
+    assert_eq!(error["details"]["retry_after_secs"], 12);
+}

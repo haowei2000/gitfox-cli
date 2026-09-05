@@ -17,6 +17,7 @@ use crate::cli::{
 use crate::context::Context;
 use crate::error::{CliError, ErrorCode, Result};
 use crate::output::{Render, key_values, plain_table, relative_time};
+use crate::paginate;
 
 pub async fn run(cmd: PipelineCommand, ctx: &Context) -> Result<()> {
     match cmd.command {
@@ -128,31 +129,60 @@ async fn list(args: PipelineListArgs, ctx: &Context) -> Result<()> {
 
     // Either way the output is a list of *runs* with the same shape, so nothing
     // downstream has to branch on which form was asked for.
-    let mut runs: Vec<(String, Execution)> = match args.pipeline.as_deref() {
-        Some(pipeline) => client
-            .pipelines()
-            .list_executions(&repo, pipeline, 1, args.limit)
+    let (client_ref, repo_ref) = (&client, &repo);
+    let (mut runs, truncated) = match args.pipeline.as_deref() {
+        Some(pipeline) => {
+            let paged = paginate::collect(args.limit, move |page, limit| async move {
+                client_ref
+                    .pipelines()
+                    .list_executions(repo_ref, pipeline, page, limit)
+                    .await
+            })
             .await
-            .map_err(|e| not_found_as_pipeline(e, pipeline))?
-            .into_iter()
-            .map(|e| (pipeline.to_string(), e))
-            .collect(),
+            .map_err(|e| not_found_as_pipeline(e, pipeline))?;
+            let runs = paged
+                .items
+                .into_iter()
+                .map(|e| (pipeline.to_string(), e))
+                .collect::<Vec<_>>();
+            (runs, paged.truncated)
+        }
         // `latest=true` embeds each pipeline's most recent run, so the whole
-        // repository's CI state costs one request instead of one per pipeline.
-        None => list_pipelines(&client, &repo, true, args.limit)
-            .await?
-            .into_iter()
-            .filter_map(|p| p.execution.clone().map(|e| (p.identifier, e)))
-            .collect(),
+        // repository's CI state costs one request per page of pipelines rather
+        // than one per pipeline. Paging is therefore over pipelines: a
+        // pipeline that has never run contributes no row, so the run count can
+        // be lower than the limit without anything being hidden.
+        None => {
+            let paged = paginate::collect(args.limit, move |page, limit| async move {
+                client_ref
+                    .pipelines()
+                    .list(repo_ref, true, page, limit)
+                    .await
+            })
+            .await
+            .map_err(|e| match e {
+                gitfox_client::Error::NotFound { .. } => CliError::new(
+                    ErrorCode::RepoNotFound,
+                    format!("no repository {repo_ref}, or you cannot see it"),
+                ),
+                other => CliError::from(other),
+            })?;
+            let runs = paged
+                .items
+                .into_iter()
+                .filter_map(|p| p.execution.clone().map(|e| (p.identifier, e)))
+                .collect::<Vec<_>>();
+            (runs, paged.truncated)
+        }
     };
 
     runs.sort_by_key(|(_, e)| std::cmp::Reverse(e.started.or(e.created).unwrap_or(0)));
-    runs.truncate(args.limit as usize);
 
     ctx.renderer
         .emit(&RunList {
             repo: repo.full(),
             runs,
+            truncated,
         })
         .map_err(unexpected)
 }
@@ -365,6 +395,7 @@ fn execution_json(pipeline: &str, execution: &Execution) -> Value {
 struct RunList {
     repo: String,
     runs: Vec<(String, Execution)>,
+    truncated: bool,
 }
 
 impl Render for RunList {
@@ -372,6 +403,7 @@ impl Render for RunList {
         json!({
             "repository": self.repo,
             "count": self.runs.len(),
+            "truncated": self.truncated,
             "items": self.to_jsonl(),
         })
     }
@@ -405,10 +437,17 @@ impl Render for RunList {
                 ]
             })
             .collect();
-        plain_table(
+        let mut out = plain_table(
             &["run", "pipeline", "status", "branch", "message", "started"],
             &rows,
-        )
+        );
+        if self.truncated {
+            out.push_str(&format!(
+                "\n\nShowing {} of more; raise --limit to see the rest.",
+                self.runs.len()
+            ));
+        }
+        out
     }
 }
 
@@ -769,6 +808,7 @@ mod tests {
         let list = RunList {
             repo: "ai/backend".into(),
             runs: vec![("default".into(), execution())],
+            truncated: false,
         };
         let text = list.to_human(false);
         assert!(text.contains("#182"), "{text}");

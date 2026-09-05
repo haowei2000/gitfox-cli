@@ -87,6 +87,10 @@ pub struct GlobalArgs {
     #[arg(long, global = true, value_name = "SECONDS")]
     pub timeout: Option<u64>,
 
+    /// Retries for transient failures on safe-to-repeat requests [env: GITFOX_RETRIES]
+    #[arg(long, global = true, value_name = "N")]
+    pub retries: Option<u32>,
+
     /// Skip TLS certificate verification [env: GITFOX_INSECURE]
     #[arg(long, global = true)]
     pub insecure: bool,
@@ -109,6 +113,7 @@ impl GlobalArgs {
                 None
             }),
             timeout: self.timeout,
+            retries: self.retries,
             insecure: self.insecure,
             agent: self.agent,
             non_interactive: self.non_interactive,

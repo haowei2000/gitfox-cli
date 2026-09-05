@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+* Transparent pagination for `repo list`, `pr list` and `pipeline list`.
+  `--limit` is now a total rather than a page size: fx walks pages at up to 100
+  rows per request. Every list carries `truncated`, observed by asking for one
+  row more than requested rather than guessed.
+* Retries for transient failures — network errors, timeouts, 429, 502, 503,
+  504 — with exponential backoff and jitter. `--retries` / `GITFOX_RETRIES`,
+  default 2. A server's `Retry-After` is honoured up to five seconds. `POST`
+  and `PATCH` are never retried; neither is `500`.
+* `RATE_LIMITED` error code (exit 6), carrying `details.retry_after_secs`.
+* [`docs/json-schema.md`](docs/json-schema.md): the machine contract, written
+  down per command.
+
 * `fx repo list | view | clone`, completing the twelve core commands.
   * `fx repo list` narrows to a named space, then `--org`, then the current
     checkout's space, and otherwise spans the instance. `-q` searches and

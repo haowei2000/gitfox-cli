@@ -16,6 +16,7 @@ use crate::context::Context;
 use crate::error::{CliError, ErrorCode, Result};
 use crate::git;
 use crate::output::{Render, key_values, plain_table, relative_time};
+use crate::paginate;
 
 pub async fn run(cmd: PrCommand, ctx: &Context) -> Result<()> {
     match cmd.command {
@@ -58,25 +59,32 @@ async fn list(args: PrListArgs, ctx: &Context) -> Result<()> {
         },
     };
 
-    let filter = PullRequestFilter {
+    let base = PullRequestFilter {
         state: args.state.expand(),
         author_id,
-        limit: args.limit,
         ..Default::default()
     };
+
     // A 404 on the repo-scoped path means the repository, not a pull request —
     // GitFox also answers 404 rather than 401 for repositories the caller
     // cannot see, so this is the common case for a typo or a missing grant.
-    let items = client
-        .pull_requests()
-        .list(&repo, &filter)
-        .await
-        .map_err(|e| not_found_as_repo(e, &repo))?;
+    let (client, repo_ref, base) = (&client, &repo, &base);
+    let paged = paginate::collect(args.limit, move |page, limit| async move {
+        let filter = PullRequestFilter {
+            page,
+            limit,
+            ..base.clone()
+        };
+        client.pull_requests().list(repo_ref, &filter).await
+    })
+    .await
+    .map_err(|e| not_found_as_repo(e, &repo))?;
 
     ctx.renderer
         .emit(&PullRequestList {
             repo: repo.full(),
-            items,
+            items: paged.items,
+            truncated: paged.truncated,
         })
         .map_err(unexpected)
 }
@@ -312,6 +320,8 @@ fn state_colour(state: &str) -> &'static str {
 struct PullRequestList {
     repo: String,
     items: Vec<PullRequest>,
+    /// Whether the server had more than `--limit` allowed through.
+    truncated: bool,
 }
 
 impl Render for PullRequestList {
@@ -319,6 +329,7 @@ impl Render for PullRequestList {
         json!({
             "repository": self.repo,
             "count": self.items.len(),
+            "truncated": self.truncated,
             "items": self.items,
         })
     }
@@ -354,10 +365,17 @@ impl Render for PullRequestList {
                 ]
             })
             .collect();
-        plain_table(
+        let mut out = plain_table(
             &["number", "title", "state", "branches", "author", "updated"],
             &rows,
-        )
+        );
+        if self.truncated {
+            out.push_str(&format!(
+                "\n\nShowing {} of more; raise --limit to see the rest.",
+                self.items.len()
+            ));
+        }
+        out
     }
 }
 
@@ -537,6 +555,7 @@ mod tests {
         let list = PullRequestList {
             repo: "ai/backend".into(),
             items: vec![pr(12, "open", false), pr(13, "merged", false)],
+            truncated: false,
         };
         let value = list.to_json();
         assert_eq!(value["repository"], "ai/backend");
@@ -549,6 +568,7 @@ mod tests {
         let list = PullRequestList {
             repo: "ai/backend".into(),
             items: vec![pr(12, "open", false), pr(13, "merged", false)],
+            truncated: true,
         };
         let rows = list.to_jsonl();
         assert_eq!(rows.len(), 2);
@@ -560,6 +580,7 @@ mod tests {
         let list = PullRequestList {
             repo: "ai/backend".into(),
             items: vec![],
+            truncated: false,
         };
         assert!(list.to_human(false).contains("No pull requests"));
         assert_eq!(list.to_json()["count"], 0);
@@ -570,6 +591,7 @@ mod tests {
         let list = PullRequestList {
             repo: "ai/backend".into(),
             items: vec![pr(12, "open", true)],
+            truncated: false,
         };
         let text = list.to_human(false);
         assert!(text.contains("draft"), "{text}");

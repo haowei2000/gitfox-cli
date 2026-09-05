@@ -8,6 +8,7 @@ use crate::context::Context;
 use crate::error::{CliError, ErrorCode, Result};
 use crate::git;
 use crate::output::{Render, key_values, plain_table, relative_time};
+use crate::paginate;
 
 pub async fn run(cmd: RepoCommand, ctx: &Context) -> Result<()> {
     match cmd.command {
@@ -35,27 +36,32 @@ async fn list(args: RepoListArgs, ctx: &Context) -> Result<()> {
         .or_else(|| ctx.config.org.clone())
         .or_else(|| current_space(ctx));
 
-    let repos = match space.as_deref() {
-        Some(space) => client
-            .repos()
-            .list_in_space(space, args.search.as_deref(), sort, 1, args.limit)
-            .await
-            .map_err(|e| match e {
-                gitfox_client::Error::NotFound { .. } => {
-                    CliError::new(ErrorCode::NotFound, format!("no space `{space}`"))
-                }
-                other => CliError::from(other),
-            })?,
-        None => {
-            client
-                .repos()
-                .list(args.search.as_deref(), sort, 1, args.limit)
-                .await?
+    let (client, search, scope) = (&client, args.search.as_deref(), space.as_deref());
+    let paged = paginate::collect(args.limit, move |page, limit| async move {
+        match scope {
+            Some(space) => {
+                client
+                    .repos()
+                    .list_in_space(space, search, sort, page, limit)
+                    .await
+            }
+            None => client.repos().list(search, sort, page, limit).await,
         }
-    };
+    })
+    .await
+    .map_err(|e| match (e, space.as_deref()) {
+        (gitfox_client::Error::NotFound { .. }, Some(space)) => {
+            CliError::new(ErrorCode::NotFound, format!("no space `{space}`"))
+        }
+        (other, _) => CliError::from(other),
+    })?;
 
     ctx.renderer
-        .emit(&RepoList { space, repos })
+        .emit(&RepoList {
+            space,
+            repos: paged.items,
+            truncated: paged.truncated,
+        })
         .map_err(unexpected)
 }
 
@@ -169,6 +175,7 @@ fn repository_json(repo: &Repository) -> Value {
 struct RepoList {
     space: Option<String>,
     repos: Vec<Repository>,
+    truncated: bool,
 }
 
 impl Render for RepoList {
@@ -176,6 +183,7 @@ impl Render for RepoList {
         json!({
             "space": self.space,
             "count": self.repos.len(),
+            "truncated": self.truncated,
             "items": self.to_jsonl(),
         })
     }
@@ -215,7 +223,14 @@ impl Render for RepoList {
             headers.push("visibility");
         }
         headers.extend(["default", "updated", "description"]);
-        plain_table(&headers, &rows)
+        let mut out = plain_table(&headers, &rows);
+        if self.truncated {
+            out.push_str(&format!(
+                "\n\nShowing {} of more; raise --limit to see the rest.",
+                self.repos.len()
+            ));
+        }
+        out
     }
 }
 
@@ -326,6 +341,7 @@ mod tests {
         let scoped = RepoList {
             space: Some("ai".into()),
             repos: vec![repo("backend", Some(false))],
+            truncated: false,
         };
         let text = scoped.to_human(false);
         assert!(text.contains("VISIBILITY"), "{text}");
@@ -335,6 +351,7 @@ mod tests {
         let instance_wide = RepoList {
             space: None,
             repos: vec![repo("backend", None)],
+            truncated: false,
         };
         let text = instance_wide.to_human(false);
         assert!(!text.contains("VISIBILITY"), "{text}");
@@ -346,6 +363,7 @@ mod tests {
         let list = RepoList {
             space: None,
             repos: vec![repo("backend", None)],
+            truncated: false,
         };
         let value = list.to_json();
         assert_eq!(value["count"], 1);
@@ -359,11 +377,13 @@ mod tests {
         let scoped = RepoList {
             space: Some("ai".into()),
             repos: vec![],
+            truncated: false,
         };
         assert!(scoped.to_human(false).contains("No repositories in ai"));
         let all = RepoList {
             space: None,
             repos: vec![],
+            truncated: false,
         };
         assert!(all.to_human(false).contains("No repositories found"));
     }
@@ -373,6 +393,7 @@ mod tests {
         let list = RepoList {
             space: None,
             repos: vec![repo("backend", None), repo("frontend", None)],
+            truncated: true,
         };
         let rows = list.to_jsonl();
         assert_eq!(rows.len(), 2);

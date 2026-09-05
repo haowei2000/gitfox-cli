@@ -33,6 +33,13 @@ pub enum Error {
     #[error("network error: {0}")]
     Network(String),
 
+    /// The server asked us to slow down (429), optionally saying for how long.
+    #[error("rate limited by the server: {message}")]
+    RateLimited {
+        retry_after: Option<u64>,
+        message: String,
+    },
+
     /// Any other non-success HTTP status.
     #[error("API error (HTTP {status}): {message}")]
     Api {

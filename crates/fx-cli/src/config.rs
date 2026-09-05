@@ -26,12 +26,14 @@ pub const ENV_ORG: &str = "GITFOX_ORG";
 pub const ENV_OUTPUT: &str = "GITFOX_OUTPUT";
 pub const ENV_CONFIG: &str = "GITFOX_CONFIG";
 pub const ENV_TIMEOUT: &str = "GITFOX_TIMEOUT";
+pub const ENV_RETRIES: &str = "GITFOX_RETRIES";
 pub const ENV_INSECURE: &str = "GITFOX_INSECURE";
 pub const ENV_AGENT: &str = "GITFOX_AGENT";
 /// Honoured in addition to `--no-color`; see <https://no-color.org>.
 pub const ENV_NO_COLOR: &str = "NO_COLOR";
 
 pub const DEFAULT_TIMEOUT_SECS: u64 = gitfox_client::DEFAULT_TIMEOUT_SECS;
+pub const DEFAULT_RETRIES: u32 = gitfox_client::DEFAULT_RETRIES;
 
 /// Service name used for the OS keychain entries.
 pub const KEYRING_SERVICE: &str = "fx-gitfox";
@@ -146,6 +148,7 @@ pub struct Overrides {
     pub org: Option<String>,
     pub output: Option<OutputFormat>,
     pub timeout: Option<u64>,
+    pub retries: Option<u32>,
     pub insecure: bool,
     pub agent: bool,
     pub non_interactive: bool,
@@ -291,6 +294,7 @@ pub struct Resolved {
     pub org: Option<String>,
     pub output: OutputFormat,
     pub timeout_secs: u64,
+    pub retries: u32,
     pub insecure: bool,
     pub agent: bool,
     pub non_interactive: bool,
@@ -361,6 +365,19 @@ pub fn resolve(
         return Err(CliError::config("timeout must be greater than 0 seconds"));
     }
 
+    let retries = match cli.retries {
+        Some(retries) => retries,
+        None => match env.get(ENV_RETRIES) {
+            Some(raw) => raw.parse::<u32>().map_err(|_| {
+                CliError::new(
+                    ErrorCode::ConfigError,
+                    format!("{ENV_RETRIES}: expected a whole number of retries, got `{raw}`"),
+                )
+            })?,
+            None => DEFAULT_RETRIES,
+        },
+    };
+
     let insecure = cli.insecure
         || env.get(ENV_INSECURE).is_some_and(|v| parse_bool(&v))
         || host_key
@@ -389,6 +406,7 @@ pub fn resolve(
         org: cli.org.clone().or_else(|| env.get(ENV_ORG)),
         output,
         timeout_secs,
+        retries,
         insecure,
         agent,
         non_interactive,
@@ -782,6 +800,56 @@ mod tests {
             .timeout_secs,
             9
         );
+    }
+
+    #[test]
+    fn retries_follow_the_same_chain_as_everything_else() {
+        assert_eq!(
+            resolved(
+                Overrides::default(),
+                MapEnv::default(),
+                ConfigFile::default(),
+                GitContext::default()
+            )
+            .retries,
+            DEFAULT_RETRIES
+        );
+        assert_eq!(
+            resolved(
+                Overrides::default(),
+                MapEnv::new([(ENV_RETRIES, "5")]),
+                ConfigFile::default(),
+                GitContext::default()
+            )
+            .retries,
+            5
+        );
+        assert_eq!(
+            resolved(
+                Overrides {
+                    retries: Some(0),
+                    ..Default::default()
+                },
+                MapEnv::new([(ENV_RETRIES, "5")]),
+                ConfigFile::default(),
+                GitContext::default()
+            )
+            .retries,
+            0
+        );
+    }
+
+    #[test]
+    fn a_bad_retry_count_is_a_config_error() {
+        let err = resolve(
+            &Overrides::default(),
+            &MapEnv::new([(ENV_RETRIES, "lots")]),
+            &ConfigFile::default(),
+            &GitContext::default(),
+            Tty::interactive(),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::ConfigError);
     }
 
     #[test]

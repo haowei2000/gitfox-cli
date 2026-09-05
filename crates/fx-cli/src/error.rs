@@ -24,6 +24,7 @@ pub enum ErrorCode {
     ApiError,
     NetworkError,
     Timeout,
+    RateLimited,
     ConfigError,
     GitContextError,
     NotImplemented,
@@ -44,6 +45,7 @@ impl ErrorCode {
             Self::ApiError => "API_ERROR",
             Self::NetworkError => "NETWORK_ERROR",
             Self::Timeout => "TIMEOUT",
+            Self::RateLimited => "RATE_LIMITED",
             Self::ConfigError => "CONFIG_ERROR",
             Self::GitContextError => "GIT_CONTEXT_ERROR",
             Self::NotImplemented => "NOT_IMPLEMENTED",
@@ -59,7 +61,7 @@ impl ErrorCode {
             Self::AuthRequired | Self::AuthFailed => 3,
             Self::NotFound | Self::RepoNotFound | Self::PrNotFound | Self::PipelineNotFound => 4,
             Self::ApiError => 5,
-            Self::NetworkError | Self::Timeout => 6,
+            Self::NetworkError | Self::Timeout | Self::RateLimited => 6,
             Self::ConfigError => 7,
             Self::GitContextError => 8,
             Self::NotImplemented => 9,
@@ -160,6 +162,12 @@ impl From<gitfox_client::Error> for CliError {
                 .with_hint("raise the limit with --timeout or GITFOX_TIMEOUT"),
             E::Network(ref detail) => CliError::new(ErrorCode::NetworkError, err.to_string())
                 .with_details(json!({ "detail": detail })),
+            E::RateLimited {
+                retry_after,
+                ref message,
+            } => CliError::new(ErrorCode::RateLimited, format!("rate limited: {message}"))
+                .with_details(json!({ "retry_after_secs": retry_after }))
+                .with_hint("fx already retried; raise --retries or wait before trying again"),
             E::Api {
                 status,
                 ref message,
@@ -191,6 +199,7 @@ mod tests {
             (ErrorCode::ApiError, 5),
             (ErrorCode::NetworkError, 6),
             (ErrorCode::Timeout, 6),
+            (ErrorCode::RateLimited, 6),
             (ErrorCode::ConfigError, 7),
             (ErrorCode::GitContextError, 8),
             (ErrorCode::NotImplemented, 9),
