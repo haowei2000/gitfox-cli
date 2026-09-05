@@ -64,7 +64,7 @@ nothing installed. They are **not** musl builds, so Alpine and
 ### From source
 
 ```bash
-cargo install --path crates/fx-cli
+cargo install --path crates/gitfox-cli
 ```
 
 A source build on Linux links against the system D-Bus for the OS keychain:
@@ -373,7 +373,7 @@ crates/
 │   ├── error.rs      typed API errors
 │   ├── models/       domain models, deliberately not the raw API DTOs
 │   └── auth.rs · repo.rs · pull_request.rs · principal.rs · pipeline.rs
-└── fx-cli/           the binary
+└── gitfox-cli/       the binary (installs as `fx`)
     ├── cli.rs        the clap command tree
     ├── config.rs     the precedence chain (pure, heavily tested)
     ├── context.rs    resolved config + renderer + client
@@ -431,12 +431,12 @@ trusting a green local run.
 Tests are layered:
 
 * unit tests for the precedence chain, error mapping and rendering
-  (`crates/fx-cli/src/*.rs`)
+  (`crates/gitfox-cli/src/*.rs`)
 * HTTP tests against a mock GitFox covering 401/403/404/500, timeouts,
   non-JSON bodies and empty responses (`crates/gitfox-client/tests/http.rs`)
 * end-to-end tests over the real binary asserting the JSON envelope, the exit
   codes, and that a token never reaches stdout or stderr — not even under
-  `-vvv` (`crates/fx-cli/tests/cli.rs`)
+  `-vvv` (`crates/gitfox-cli/tests/cli.rs`)
 
 ## Security
 

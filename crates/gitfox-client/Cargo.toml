@@ -6,7 +6,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-authors.workspace = true
+homepage.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/gitfox-client"
+keywords = ["gitfox", "api", "client", "git", "http"]
+categories = ["api-bindings", "web-programming::http-client"]
 
 [lints]
 workspace = true

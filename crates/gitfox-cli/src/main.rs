@@ -89,9 +89,9 @@ fn init_tracing(verbose: u8) {
         Ok(value) if !value.trim().is_empty() => EnvFilter::new(value),
         _ => EnvFilter::new(match verbose {
             0 => return,
-            1 => "fx_cli=info,gitfox_client=info",
-            2 => "fx_cli=debug,gitfox_client=debug",
-            _ => "fx_cli=trace,gitfox_client=trace,reqwest=debug",
+            1 => "gitfox_cli=info,gitfox_client=info",
+            2 => "gitfox_cli=debug,gitfox_client=debug",
+            _ => "gitfox_cli=trace,gitfox_client=trace,reqwest=debug",
         }),
     };
 

@@ -61,7 +61,7 @@ jobs:
         run: |
           cargo build --release --locked \
             --target ${{ matrix.target }} \
-            -p fx-cli \
+            -p gitfox-cli \
             ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
 
       - name: Check the binary runs and reports the right version

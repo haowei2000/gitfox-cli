@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/gitfox-client", "crates/fx-cli"]
+members = ["crates/gitfox-client", "crates/gitfox-cli"]
 
 [workspace.package]
 version = "0.6.0"
@@ -8,7 +8,7 @@ edition = "2024"
 rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/haowei2000/gitfox-cli"
-authors = ["GitFox CLI contributors"]
+homepage = "https://github.com/haowei2000/gitfox-cli"
 
 # Declared once so a version bump touches a single line.
 [workspace.dependencies]

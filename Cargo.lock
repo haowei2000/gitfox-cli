@@ -696,32 +696,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fx-cli"
-version = "0.6.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "clap",
- "clap_complete",
- "comfy-table",
- "dialoguer",
- "directories",
- "gitfox-client",
- "keyring",
- "predicates",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "url",
- "wiremock",
-]
-
-[[package]]
 name = "getrandom"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -746,6 +720,32 @@ dependencies = [
  "r-efi",
  "rand_core",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "gitfox-cli"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap",
+ "clap_complete",
+ "comfy-table",
+ "dialoguer",
+ "directories",
+ "gitfox-client",
+ "keyring",
+ "predicates",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "wiremock",
 ]
 
 [[package]]
