@@ -13,7 +13,9 @@ change; from 1.0 they are covered by the version promise. See
 
 ## [0.6.0] — 2026-09-05
 
-First release. Everything below was verified against a live GitFox instance
+First release, published to crates.io as
+[`gitfox-cli`](https://crates.io/crates/gitfox-cli) (the `fx` binary) and
+[`gitfox-client`](https://crates.io/crates/gitfox-client) (the API client). Everything below was verified against a live GitFox instance
 (API v1.3.0), not only against mocks.
 
 ### Commands

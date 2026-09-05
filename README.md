@@ -1,5 +1,10 @@
 # fx — GitFox CLI for humans, CI and AI agents
 
+[![crates.io](https://img.shields.io/crates/v/gitfox-cli.svg)](https://crates.io/crates/gitfox-cli)
+[![docs.rs](https://img.shields.io/docsrs/gitfox-client)](https://docs.rs/gitfox-client)
+[![CI](https://github.com/haowei2000/gitfox-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/haowei2000/gitfox-cli/actions/workflows/ci.yml)
+[![license](https://img.shields.io/crates/l/gitfox-cli.svg)](LICENSE)
+
 `fx` is a single Rust binary that talks to a GitFox instance. It is built for
 three callers at once, and it knows which one it is talking to:
 
@@ -33,10 +38,16 @@ Next: `fx-mcp` (v0.7), reusing `gitfox-client` directly.
 
 ## Install
 
+```bash
+cargo install gitfox-cli
+```
+
+The crate is `gitfox-cli`; the binary it installs is `fx`. (`fx` on crates.io
+belongs to an unrelated tool.)
+
 ### A prebuilt binary
 
-Download it from [the latest release][releases], make it executable, and put it
-on your `PATH`:
+No Rust toolchain needed. Download from [the latest release][releases]:
 
 ```bash
 # macOS (Apple silicon)
@@ -59,9 +70,9 @@ The Linux binaries link libdbus statically — their only shared-library
 dependencies are `libc`, `libm` and `libgcc_s` — so they run in a slim
 glibc-based image (`debian:*-slim`, `ubuntu`, `gcr.io/distroless/base`) with
 nothing installed. They are **not** musl builds, so Alpine and
-`distroless/static` need a source build instead.
+`distroless/static` need a source build.
 
-### From source
+### From a checkout
 
 ```bash
 cargo install --path crates/gitfox-cli
@@ -348,6 +359,13 @@ again, not a blip.
 Full table with the matching `error.code` strings: [docs/exit-codes.md](docs/exit-codes.md).
 The JSON each command returns: [docs/json-schema.md](docs/json-schema.md).
 
+## Crates
+
+| Crate | What it is |
+|---|---|
+| [`gitfox-cli`](https://crates.io/crates/gitfox-cli) | the `fx` binary |
+| [`gitfox-client`](https://crates.io/crates/gitfox-client) · [docs](https://docs.rs/gitfox-client) | the GitFox API client, reusable on its own |
+
 ## Architecture
 
 ```
@@ -403,7 +421,7 @@ Two rules keep this from rotting:
 | **v0.5** ✅ | `pr checkout/diff/checks`, `pr create --fill`, shell completion |
 | **v0.6** ✅ | agent hardening: pagination, retries, non-interactive edges, schema freeze |
 | [v0.7](https://github.com/haowei2000/gitfox-cli/milestone/1) | `fx-mcp`, reusing `gitfox-client` directly |
-| [v1.0](https://github.com/haowei2000/gitfox-cli/milestone/2) | CLI syntax, JSON schema, config format and exit codes all stable; published to crates.io |
+| [v1.0](https://github.com/haowei2000/gitfox-cli/milestone/2) | CLI syntax, JSON schema, config format and exit codes all stable |
 
 The twelve commands v0.1–v0.4 aim to make rock solid: `auth login/logout/status`,
 `api`, `repo list/view`, `pr list/view/create/merge`, `pipeline list/logs`.
