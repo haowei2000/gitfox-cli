@@ -40,14 +40,20 @@ on your `PATH`:
 
 ```bash
 # macOS (Apple silicon)
-curl -sSL -o fx.tar.gz https://github.com/haowei2000/gitfox-cli/releases/latest/download/fx-darwin-aarch64.tar.gz
-tar -xzf fx.tar.gz fx && chmod +x fx && sudo mv fx /usr/local/bin/
+BASE=https://github.com/haowei2000/gitfox-cli/releases/latest/download
+curl -sSLO "$BASE/fx-darwin-aarch64.tar.gz"
+curl -sSLO "$BASE/SHA256SUMS"
+
+# Keep the published name so the checksum can be checked against it.
+shasum -a 256 --ignore-missing -c SHA256SUMS   # sha256sum on Linux
+
+tar -xzf fx-darwin-aarch64.tar.gz fx && chmod +x fx && sudo mv fx /usr/local/bin/
 fx --version
 ```
 
 Built for `darwin-aarch64`, `darwin-x86_64`, `linux-x86_64`, `linux-aarch64`
-and `windows-x86_64`. Every release ships a `SHA256SUMS`; verify with
-`sha256sum -c SHA256SUMS`.
+and `windows-x86_64`. `--ignore-missing` is what lets one line verify the one
+archive you downloaded out of the five listed.
 
 The Linux binaries link libdbus statically — their only shared-library
 dependencies are `libc`, `libm` and `libgcc_s` — so they run in a slim
