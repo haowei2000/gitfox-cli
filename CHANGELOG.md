@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+* `fx repo list | view | clone`, completing the twelve core commands.
+  * `fx repo list` narrows to a named space, then `--org`, then the current
+    checkout's space, and otherwise spans the instance. `-q` searches and
+    `--sort` orders by name, creation or update.
+  * `fx repo clone` clones into a directory named after the repository, not
+    after the URL's last segment. The token is never spliced into the URL;
+    `git` keeps its own progress output and credential prompt. `--ssh` selects
+    the SSH clone URL.
+  * `fx repo view` defaults to the current checkout's repository.
+* `Repository` decodes both shapes GitFox returns. The instance-wide
+  `GET /repos` omits `is_public`, so visibility there is `null` — unknown
+  rather than wrongly reported as private — and the human table drops the
+  column instead of showing a row of dashes.
+
 * `fx pipeline list | view | logs | run | retry`, against endpoints verified
   from the instance's own `/openapi.yaml` (GitFox API v1.3.0).
   * `fx pipeline logs --failed` reads the run, walks its stages for steps that

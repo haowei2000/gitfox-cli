@@ -23,16 +23,14 @@ machine never has to parse prose:
 
 ## Status
 
-**v0.4 — pull requests and CI work.** `fx pr list|view|create|merge` and
-`fx pipeline list|view|logs|run|retry` are implemented against a verified GitFox
-API v1.3.0, on top of the v0.1 foundation (configuration chain, client,
-`fx api`, `fx auth`, `fx config`, output system, error and exit-code contract)
-and git remote detection pulled forward from v0.2.
+**v0.4 — the twelve core commands are done.** `repo`, `pr` and `pipeline` are
+all implemented against a verified GitFox API v1.3.0, on the v0.1 foundation:
+the configuration chain, the client, `fx api`, `fx auth`, `fx config`, the
+output system, and the error and exit-code contract.
 
-Still on the roadmap: `fx repo list|view|clone` (v0.2) and
-`fx pr checkout|diff|checks` (v0.5). Each returns a structured
-`NOT_IMPLEMENTED` error naming its version, and `fx api` reaches every endpoint
-in the meantime.
+Still on the roadmap: `fx pr checkout|diff|checks` (v0.5), then agent hardening
+(v0.6) and MCP (v0.7). The three v0.5 commands return a structured
+`NOT_IMPLEMENTED` error, and `fx api` reaches every endpoint in the meantime.
 
 ## Install
 
@@ -64,6 +62,31 @@ Or log in interactively and let the token live in the OS keychain:
 ```bash
 fx auth login --hostname git.example.com
 ```
+
+## Repositories
+
+```bash
+fx repo list              # this space, or the whole instance from outside one
+fx repo list ai -q back   # search within a space
+fx repo view              # the current checkout's repository
+fx repo clone ai/backend  # into ./backend
+```
+
+```
+REPOSITORY   VISIBILITY  DEFAULT  UPDATED  DESCRIPTION
+ai/backend   private     main     3d ago   The backend
+ai/docs      public      main     2w ago
+```
+
+The visibility column appears only when GitFox reported it. The instance-wide
+listing (`GET /repos`) answers with a narrower shape than the space-scoped one,
+so a repository there has *unknown* visibility rather than a guessed one — and
+the column is dropped rather than filled with dashes.
+
+`fx repo clone` hands the URL to `git`, which keeps its own progress output and
+its own credential prompt. fx does not splice the token into the URL: that would
+write it into `.git/config`, where it outlives the command and travels with the
+checkout. Use `--ssh` to clone over SSH instead.
 
 ## Pull requests
 
@@ -279,7 +302,7 @@ Two rules keep this from rotting:
 | Version | Scope |
 |---|---|
 | **v0.1** ✅ | workspace, client, config chain, env vars, auth, `fx api`, JSON output, error model |
-| v0.2 ◐ | git remote detection and `-R` ✅; `repo list/view/clone` still to come |
+| **v0.2** ✅ | `repo list/view/clone`, git remote detection, `-R`, multi-host |
 | **v0.3** ✅ | `pr list/view/create/merge` — the first genuinely daily-usable release |
 | **v0.4** ✅ | `pipeline list/view/logs/run/retry`, including `logs --failed` |
 | v0.5 | `pr checkout/diff/checks`, `pr create --fill`, shell completion, nicer tables |
@@ -289,7 +312,7 @@ Two rules keep this from rotting:
 
 The twelve commands v0.1–v0.4 aim to make rock solid: `auth login/logout/status`,
 `api`, `repo list/view`, `pr list/view/create/merge`, `pipeline list/logs`.
-Eleven are done; `repo list` and `repo view` remain.
+All twelve are done.
 
 ### Where the endpoints come from
 

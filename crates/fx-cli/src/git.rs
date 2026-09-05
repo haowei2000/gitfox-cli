@@ -8,7 +8,8 @@
 //! checkout, and `fx pr checkout` will have to drive the real `git` for its
 //! credentials anyway.
 
-use std::process::Command;
+use std::path::Path;
+use std::process::{Command, Stdio};
 
 use crate::config::GitContext;
 
@@ -146,6 +147,38 @@ pub fn fill_from_commits(commits: &[Commit]) -> Option<(String, String)> {
             Some((first.subject.clone(), bullets))
         }
     }
+}
+
+/// Run `git clone` into `destination`, letting git own the terminal.
+///
+/// stderr is inherited so progress and any credential prompt reach the user;
+/// stdout is captured because it is not part of what a caller asked for and
+/// would otherwise break the machine output contract.
+///
+/// `destination` is always explicit. Letting git derive it from the URL would
+/// name the directory after whatever the URL happens to end with, which is only
+/// incidentally the repository's name — the caller knows the real one.
+///
+/// The URL is passed through untouched. fx never splices a token into it: that
+/// would write the credential into `.git/config`, where it outlives the command
+/// and travels with the checkout.
+pub fn clone(url: &str, destination: &Path) -> Result<(), String> {
+    let output = Command::new("git")
+        .arg("clone")
+        .arg(url)
+        .arg(destination)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .output()
+        .map_err(|e| format!("could not run git: {e}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(match output.status.code() {
+        Some(code) => format!("git clone exited with status {code}"),
+        None => "git clone was terminated by a signal".to_string(),
+    })
 }
 
 #[derive(Debug, PartialEq)]

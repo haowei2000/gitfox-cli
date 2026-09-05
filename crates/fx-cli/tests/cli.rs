@@ -134,10 +134,11 @@ fn an_unparseable_environment_variable_is_reported_not_ignored() {
 #[test]
 fn commands_still_on_the_roadmap_say_so_in_a_structured_way() {
     let home = TempDir::new().unwrap();
+    // Everything in the v0.1-v0.4 scope is implemented; only v0.5 remains.
     for (args, command, version) in [
-        (vec!["--agent", "repo", "list"], "fx repo list", "v0.2"),
         (vec!["--agent", "pr", "diff"], "fx pr diff", "v0.5"),
         (vec!["--agent", "pr", "checks"], "fx pr checks", "v0.5"),
+        (vec!["--agent", "pr", "checkout"], "fx pr checkout", "v0.5"),
     ] {
         let output = fx(home.path()).args(&args).output().unwrap();
         assert_eq!(code(&output), 9, "for {args:?}");
@@ -1308,4 +1309,282 @@ async fn a_step_whose_log_is_not_ready_yet_does_not_fail_the_command() {
     // Still reported, with the status and exit code, just without output.
     assert_eq!(step["exit_code"], 101);
     assert_eq!(step["lines"].as_array().unwrap().len(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// fx repo
+// ---------------------------------------------------------------------------
+
+fn repo_json(name: &str, is_public: Option<bool>) -> Value {
+    let mut value = json!({
+        "identifier": name,
+        "path": format!("ai/{name}"),
+        "description": "The backend",
+        "default_branch": "main",
+        "num_open_pulls": 2,
+        "updated": 1_756_000_000_000i64
+    });
+    if let Some(public) = is_public {
+        value["is_public"] = json!(public);
+    }
+    value
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn repo_list_without_a_space_spans_the_instance() {
+    let server = MockServer::start().await;
+    // `GET /repos` answers with the shape that has no is_public.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos"))
+        .and(query_param("sort", "identifier"))
+        .and(query_param("order", "asc"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            repo_json("backend", None),
+            repo_json("frontend", None)
+        ])))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let human = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .args(["repo", "list"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        code(&human),
+        0,
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
+    let text = String::from_utf8_lossy(&human.stdout);
+    assert!(text.contains("ai/backend"), "{text}");
+    // No visibility to show, so no column of dashes.
+    assert!(!text.contains("VISIBILITY"), "{text}");
+
+    let machine = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .args(["--agent", "repo", "list"])
+        .output()
+        .unwrap();
+    let data = &stdout_json(&machine)["data"];
+    assert_eq!(data["count"], 2);
+    assert!(data["space"].is_null());
+    assert!(data["items"][0]["visibility"].is_null());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn repo_list_in_a_space_reports_visibility() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/spaces/ai/repos"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            repo_json("backend", Some(false)),
+            repo_json("docs", Some(true))
+        ])))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let human = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .args(["repo", "list", "ai"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&human), 0);
+    let text = String::from_utf8_lossy(&human.stdout);
+    assert!(text.contains("VISIBILITY"), "{text}");
+    assert!(text.contains("private"), "{text}");
+    assert!(text.contains("public"), "{text}");
+
+    let machine = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .args(["--agent", "repo", "list", "ai"])
+        .output()
+        .unwrap();
+    let data = &stdout_json(&machine)["data"];
+    assert_eq!(data["space"], "ai");
+    assert_eq!(data["items"][0]["visibility"], "private");
+    assert_eq!(data["items"][1]["is_public"], true);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn repo_list_narrows_to_the_space_of_the_current_repository() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/spaces/ai/repos"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!([repo_json("backend", Some(false))])),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    // GITFOX_REPO says ai/backend, so a bare `repo list` means "this space".
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "repo", "list"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(stdout_json(&output)["data"]["space"], "ai");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn repo_view_uses_the_current_repository_and_reports_a_missing_one() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/ai%2Fbackend"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(repo_json("backend", Some(false))))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/ai%2Fnope"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" })))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let found = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .env("GITFOX_REPO", "ai/backend")
+        .args(["--agent", "repo", "view"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        code(&found),
+        0,
+        "{}",
+        String::from_utf8_lossy(&found.stdout)
+    );
+    assert_eq!(stdout_json(&found)["data"]["repository"], "ai/backend");
+    assert_eq!(stdout_json(&found)["data"]["default_branch"], "main");
+
+    let missing = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .args(["--agent", "repo", "view", "ai/nope"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&missing), 4);
+    assert_eq!(stdout_json(&missing)["error"]["code"], "REPO_NOT_FOUND");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn repo_clone_really_clones_the_url_the_api_reported() {
+    // A real source repository, so `git clone` does real work.
+    let home = TempDir::new().unwrap();
+    let source = home.path().join("source");
+    std::fs::create_dir(&source).unwrap();
+    git(&source, &["init", "-q", "-b", "main"]);
+    git(&source, &["config", "user.email", "t@example.com"]);
+    git(&source, &["config", "user.name", "Test"]);
+    std::fs::write(source.join("README.md"), "hello").unwrap();
+    git(&source, &["add", "README.md"]);
+    git(&source, &["commit", "-q", "-m", "initial"]);
+
+    let server = MockServer::start().await;
+    let mut repository = repo_json("backend", Some(false));
+    repository["git_url"] = json!(format!("file://{}", source.display()));
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/ai%2Fbackend"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(repository))
+        .mount(&server)
+        .await;
+
+    let workdir = home.path().join("work");
+    std::fs::create_dir(&workdir).unwrap();
+    let mut cmd = fx(home.path());
+    cmd.current_dir(&workdir)
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .args(["--agent", "repo", "clone", "ai/backend"]);
+    let output = cmd.output().unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let data = &stdout_json(&output)["data"];
+    assert_eq!(data["repository"], "ai/backend");
+    // Named after the repository, not after the URL — the source directory here
+    // is called "source", which is what git on its own would have used.
+    assert_eq!(data["directory"], "backend");
+    assert!(workdir.join("backend/README.md").exists());
+    assert!(workdir.join("backend/.git").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn repo_clone_takes_an_explicit_directory() {
+    let home = TempDir::new().unwrap();
+    let source = home.path().join("source");
+    std::fs::create_dir(&source).unwrap();
+    git(&source, &["init", "-q", "-b", "main"]);
+    git(&source, &["config", "user.email", "t@example.com"]);
+    git(&source, &["config", "user.name", "Test"]);
+    git(&source, &["commit", "-q", "--allow-empty", "-m", "initial"]);
+
+    let server = MockServer::start().await;
+    let mut repository = repo_json("backend", Some(false));
+    repository["git_url"] = json!(format!("file://{}", source.display()));
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/ai%2Fbackend"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(repository))
+        .mount(&server)
+        .await;
+
+    let workdir = home.path().join("work2");
+    std::fs::create_dir(&workdir).unwrap();
+    let mut cmd = fx(home.path());
+    cmd.current_dir(&workdir)
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .args(["--agent", "repo", "clone", "ai/backend", "elsewhere"]);
+    let output = cmd.output().unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(stdout_json(&output)["data"]["directory"], "elsewhere");
+    assert!(workdir.join("elsewhere/.git").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repository_with_no_clone_url_fails_before_running_git() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/ai%2Fbackend"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(repo_json("backend", Some(false))))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .args(["--agent", "repo", "clone", "ai/backend"])
+        .output()
+        .unwrap();
+
+    assert_eq!(code(&output), 5);
+    assert_eq!(stdout_json(&output)["error"]["code"], "API_ERROR");
 }

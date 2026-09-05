@@ -37,3 +37,4 @@ pub use models::{
     Stage, Step, User,
 };
 pub use pull_request::PullRequestFilter;
+pub use repo::RepoSort;

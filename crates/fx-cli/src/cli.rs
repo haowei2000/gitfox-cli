@@ -252,11 +252,38 @@ pub enum RepoSubcommand {
     Clone(RepoCloneArgs),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[value(rename_all = "lower")]
+pub enum RepoSort {
+    Name,
+    Created,
+    Updated,
+}
+
+impl From<RepoSort> for gitfox_client::RepoSort {
+    fn from(value: RepoSort) -> Self {
+        match value {
+            RepoSort::Name => Self::Name,
+            RepoSort::Created => Self::Created,
+            RepoSort::Updated => Self::Updated,
+        }
+    }
+}
+
 #[derive(Debug, Args)]
 pub struct RepoListArgs {
-    /// Space to list; defaults to --org or the current repository's space
+    /// Space to list; defaults to --org, then the current repository's space,
+    /// then every space you can see
     #[arg(value_name = "SPACE")]
     pub space: Option<String>,
+
+    /// Only repositories whose name matches
+    #[arg(short = 'q', long, value_name = "TEXT")]
+    pub search: Option<String>,
+
+    /// Sort order
+    #[arg(long, value_name = "KEY", default_value = "name")]
+    pub sort: RepoSort,
 
     /// Maximum number of repositories to return
     #[arg(short = 'L', long, value_name = "N", default_value_t = 30)]
@@ -279,6 +306,10 @@ pub struct RepoCloneArgs {
     /// Directory to clone into
     #[arg(value_name = "DIRECTORY")]
     pub directory: Option<PathBuf>,
+
+    /// Clone over SSH instead of HTTP
+    #[arg(long)]
+    pub ssh: bool,
 }
 
 // ---------------------------------------------------------------------------
