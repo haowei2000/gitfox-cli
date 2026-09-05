@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/gitfox-client", "crates/gitfox-cli"]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.6.1"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -12,7 +12,7 @@ homepage = "https://github.com/haowei2000/gitfox-cli"
 
 # Declared once so a version bump touches a single line.
 [workspace.dependencies]
-gitfox-client = { path = "crates/gitfox-client", version = "0.6.0" }
+gitfox-client = { path = "crates/gitfox-client", version = "0.6.1" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

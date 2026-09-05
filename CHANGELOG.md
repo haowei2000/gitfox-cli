@@ -11,6 +11,8 @@ change; from 1.0 they are covered by the version promise. See
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-09-05
+
 ### Fixed
 
 * `fx pipeline logs` now returns a running step's output. GitFox does not
