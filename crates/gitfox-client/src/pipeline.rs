@@ -8,6 +8,7 @@
 //! | list executions | `GET …/pipelines/{pipeline_identifier}/executions` |
 //! | view execution  | `GET …/executions/{execution_number}` |
 //! | step logs       | `GET …/executions/{execution_number}/logs/{stage_number}/{step_number}` |
+//! | live step logs  | `GET …/logs/{stage_number}/{step_number}/stream` (SSE, undocumented) |
 //! | retry           | `POST …/executions/{execution_number}/retry` |
 //! | cancel          | `POST …/executions/{execution_number}/cancel` |
 //! | trigger a run   | `POST …/pipelines/{pipeline_identifier}/executions?branch=…` |
@@ -21,6 +22,11 @@
 //!   the single-execution endpoint returns the stage tree. So
 //!   `fx pipeline logs --failed` reads the execution first, walks it for steps
 //!   that failed, and fetches only those.
+//! * A step's log is not persisted until it finishes: the static endpoint
+//!   answers 404 for a running step, and its output is only reachable over the
+//!   SSE stream. The two endpoints are complementary, not alternatives.
+
+use std::time::Duration;
 
 use crate::client::{GitFoxClient, Method, Query};
 use crate::error::Result;
@@ -101,6 +107,33 @@ impl<'a> PipelinesApi<'a> {
             self.execution_path(repo, pipeline, number)
         );
         self.client.get_json(&path).await
+    }
+
+    /// Live log lines for a step that is still running.
+    ///
+    /// The static log endpoint answers 404 until a step finishes — GitFox does
+    /// not persist the log before then — so a running step's output is only
+    /// reachable over this server-sent-event stream. It is not in the
+    /// instance's OpenAPI document; the payload is the same [`LogLine`] the
+    /// static endpoint returns.
+    ///
+    /// Returns once the stream says `eof`, or once `idle` passes with nothing
+    /// new arriving — which is how a snapshot of a still-running step ends,
+    /// since that stream stays open indefinitely.
+    pub async fn step_logs_live(
+        &self,
+        repo: &RepoRef,
+        pipeline: &str,
+        number: u64,
+        stage: i64,
+        step: i64,
+        idle: Duration,
+    ) -> Result<Vec<LogLine>> {
+        let path = format!(
+            "{}/logs/{stage}/{step}/stream",
+            self.execution_path(repo, pipeline, number)
+        );
+        self.client.sse_lines(&path, idle).await
     }
 
     /// `POST …/executions/{execution_number}/retry`

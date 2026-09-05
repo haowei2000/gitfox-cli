@@ -2173,3 +2173,144 @@ async fn a_closed_pipe_on_a_data_command_is_also_clean() {
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert_eq!(output.status.code(), Some(0), "stderr:\n{stderr}");
 }
+
+// ---------------------------------------------------------------------------
+// live logs
+// ---------------------------------------------------------------------------
+
+/// A run with one finished step and one still going.
+fn running_execution() -> Value {
+    json!({
+        "number": 132,
+        "status": "running",
+        "message": "deploy",
+        "stages": [{
+            "number": 2, "name": "environment-cd", "status": "running",
+            "steps": [
+                { "number": 1, "name": "clone", "status": "success" },
+                { "number": 2, "name": "deploy-testing", "status": "running" }
+            ]
+        }]
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_running_step_reads_the_stream_and_a_finished_one_the_stored_log() {
+    let server = MockServer::start().await;
+    let base = format!("{PIPE_PATH}/default/executions/132");
+    Mock::given(method("GET"))
+        .and(path(base.clone()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(running_execution()))
+        .mount(&server)
+        .await;
+
+    // The finished step's log is stored.
+    Mock::given(method("GET"))
+        .and(path(format!("{base}/logs/2/1")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "pos": 0, "out": "Cloning\n", "time": 1 }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // The running step's is not — GitFox answers 404 until it finishes — so
+    // asking the static endpoint for it would come back empty.
+    Mock::given(method("GET"))
+        .and(path(format!("{base}/logs/2/2")))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(0)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{base}/logs/2/2/stream")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(
+                    "data: {\"pos\":0,\"out\":\"+ apk add bash\\n\",\"time\":1}\n\n\
+                     data: {\"pos\":1,\"out\":\"fetch APKINDEX\\n\",\"time\":2}\n\n",
+                ),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = pipeline_env(home.path(), &server.uri())
+        .args([
+            "--agent",
+            "pipeline",
+            "logs",
+            "132",
+            "--pipeline",
+            "default",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let steps = &stdout_json(&output)["data"]["steps"];
+
+    assert_eq!(steps[0]["step"], "clone");
+    assert_eq!(steps[0]["live"], false);
+    assert_eq!(steps[0]["total_lines"], 1);
+
+    assert_eq!(steps[1]["step"], "deploy-testing");
+    assert_eq!(steps[1]["live"], true);
+    assert_eq!(steps[1]["log_available"], true);
+    assert_eq!(steps[1]["total_lines"], 2);
+    assert_eq!(steps[1]["lines"][0], "+ apk add bash");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_log_that_cannot_be_fetched_says_so_instead_of_looking_empty() {
+    let server = MockServer::start().await;
+    let base = format!("{PIPE_PATH}/default/executions/132");
+    Mock::given(method("GET"))
+        .and(path(base.clone()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "number": 132, "status": "failure",
+            "stages": [{ "number": 1, "name": "build", "status": "failure",
+                "steps": [{ "number": 1, "name": "compile", "status": "failure",
+                            "exit_code": 1 }] }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{base}/logs/1/1")))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" })))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let machine = pipeline_env(home.path(), &server.uri())
+        .args([
+            "--agent",
+            "pipeline",
+            "logs",
+            "132",
+            "--pipeline",
+            "default",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(code(&machine), 0);
+    let step = &stdout_json(&machine)["data"]["steps"][0];
+    // The step is still reported, with its status and exit code — but a caller
+    // can tell "produced nothing" from "could not be read".
+    assert_eq!(step["exit_code"], 1);
+    assert_eq!(step["log_available"], false);
+    assert_eq!(step["total_lines"], 0);
+
+    let human = pipeline_env(home.path(), &server.uri())
+        .args(["pipeline", "logs", "132", "--pipeline", "default"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&human.stdout);
+    assert!(text.contains("log not available yet"), "{text}");
+}

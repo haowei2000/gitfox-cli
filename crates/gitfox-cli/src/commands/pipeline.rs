@@ -19,6 +19,11 @@ use crate::error::{CliError, ErrorCode, Result};
 use crate::output::{Render, key_values, plain_table, relative_time};
 use crate::paginate;
 
+/// How long to wait for more of a running step's log before calling it a
+/// snapshot. The stream stays open for as long as the step runs, so something
+/// has to decide the backlog has been drained.
+const LIVE_LOG_IDLE: std::time::Duration = std::time::Duration::from_secs(2);
+
 pub async fn run(cmd: PipelineCommand, ctx: &Context) -> Result<()> {
     match cmd.command {
         PipelineSubcommand::List(args) => list(args, ctx).await,
@@ -241,13 +246,35 @@ async fn logs(args: PipelineLogsArgs, ctx: &Context) -> Result<()> {
     let wanted = select_steps(&execution, &args);
     let mut steps = Vec::with_capacity(wanted.len());
     for (stage, step) in wanted {
-        let lines = client
-            .pipelines()
-            .step_logs(&repo, &pipeline, number, stage.number, step.number)
-            .await
-            // A step can be listed before its log exists; an empty log is a
-            // better answer than failing the whole command.
-            .unwrap_or_default();
+        // Which endpoint has the log depends on whether the step has finished.
+        // GitFox does not persist a log until then, so the static endpoint
+        // answers 404 for a running step and its output is only on the stream.
+        let live = step.status.is_pending();
+        let fetched = if live {
+            client
+                .pipelines()
+                .step_logs_live(
+                    &repo,
+                    &pipeline,
+                    number,
+                    stage.number,
+                    step.number,
+                    LIVE_LOG_IDLE,
+                )
+                .await
+        } else {
+            client
+                .pipelines()
+                .step_logs(&repo, &pipeline, number, stage.number, step.number)
+                .await
+        };
+
+        // A step can be listed before its log is reachable. That is worth
+        // saying: an empty log and an unavailable one look identical
+        // otherwise, and the difference is whether to look again in a minute.
+        let available = fetched.is_ok();
+        let lines = fetched.unwrap_or_default();
+
         steps.push(StepLogs {
             stage_name: stage.name.clone(),
             stage_number: stage.number,
@@ -256,6 +283,8 @@ async fn logs(args: PipelineLogsArgs, ctx: &Context) -> Result<()> {
             status: step.status.as_str().to_string(),
             exit_code: step.exit_code,
             error: step.error.clone().filter(|e| !e.is_empty()),
+            live,
+            available,
             total_lines: lines.len(),
             lines: tail(lines, args.tail),
         });
@@ -571,6 +600,10 @@ struct StepLogs {
     status: String,
     exit_code: Option<i64>,
     error: Option<String>,
+    /// Whether the log came from the live stream rather than the stored log.
+    live: bool,
+    /// Whether the log could be fetched at all.
+    available: bool,
     /// How many lines the step produced, before `--tail` trimmed anything.
     total_lines: usize,
     lines: Vec<LogLine>,
@@ -593,6 +626,8 @@ impl StepLogs {
             "status": self.status,
             "exit_code": self.exit_code,
             "error": self.error,
+            "live": self.live,
+            "log_available": self.available,
             "total_lines": self.total_lines,
             "lines": self.text(),
         })
@@ -644,11 +679,12 @@ impl Render for RunLogs {
                     _ => String::new(),
                 };
                 let mut block = format!(
-                    "{bold}{} {} / {}{reset} ({}{exit})",
+                    "{bold}{} {} / {}{reset} ({}{exit}{})",
                     status_mark(&step.status),
                     step.stage_name,
                     step.step_name,
                     paint(&step.status, color),
+                    if step.live { ", output so far" } else { "" },
                 );
                 if let Some(error) = &step.error {
                     block.push_str(&format!("\n{dim}  {error}{reset}"));
@@ -661,7 +697,17 @@ impl Render for RunLogs {
                     ));
                 }
                 if text.is_empty() {
-                    block.push_str(&format!("\n{dim}  (no output){reset}"));
+                    // An unavailable log and a silent step look identical
+                    // otherwise, and the difference is whether looking again
+                    // in a minute would help.
+                    let why = if !step.available {
+                        "(log not available yet)"
+                    } else if step.live {
+                        "(running — no output yet)"
+                    } else {
+                        "(no output)"
+                    };
+                    block.push_str(&format!("\n{dim}  {why}{reset}"));
                 } else {
                     for line in text {
                         block.push_str(&format!("\n  {line}"));
@@ -788,6 +834,8 @@ mod tests {
                 status: "failure".into(),
                 exit_code: Some(101),
                 error: None,
+                live: false,
+                available: true,
                 total_lines: 2,
                 lines: vec![
                     LogLine {
@@ -848,6 +896,8 @@ mod tests {
                 status: "failure".into(),
                 exit_code: Some(1),
                 error: None,
+                live: false,
+                available: true,
                 total_lines: 1658,
                 lines: vec![line("BUILD FAILURE")],
             }],

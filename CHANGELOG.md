@@ -11,6 +11,19 @@ change; from 1.0 they are covered by the version promise. See
 
 ## [Unreleased]
 
+### Fixed
+
+* `fx pipeline logs` now returns a running step's output. GitFox does not
+  persist a step's log until it finishes, so the static log endpoint answers
+  404 while it runs and the output is only reachable over an SSE stream that
+  the instance's OpenAPI document does not mention. fx was asking the static
+  endpoint for every step and swallowing the 404, so a step in progress looked
+  like a step that had printed nothing.
+* A log that could not be fetched is no longer indistinguishable from a step
+  that produced no output. Every step now reports `log_available`, and `live`
+  says whether its lines came from the stream; the human view says which of the
+  three cases it is rather than printing an empty block.
+
 ## [0.6.0] — 2026-09-05
 
 First release, published to crates.io as

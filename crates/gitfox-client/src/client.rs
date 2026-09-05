@@ -237,6 +237,93 @@ impl GitFoxClient {
         Some((base + jitter(base)).min(MAX_BACKOFF))
     }
 
+    /// Read a server-sent-event stream, collecting each `data:` payload that
+    /// deserialises into `T`.
+    ///
+    /// Stops on the stream's own `event: error` / `data: eof`, or once `idle`
+    /// passes with no new bytes — a stream following something still in
+    /// progress never ends on its own, so a snapshot has to decide when the
+    /// backlog has been drained.
+    ///
+    /// The client's request timeout is deliberately not applied: it bounds a
+    /// whole request/response, which for a stream would cut the body off
+    /// mid-flight. The idle window bounds this instead.
+    pub async fn sse_lines<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        idle: Duration,
+    ) -> Result<Vec<T>> {
+        let url = self.resolve(path)?;
+        tracing::debug!(url = %url, "gitfox log stream");
+
+        let mut req = self
+            .http
+            .get(url)
+            .header(ACCEPT, "text/event-stream")
+            .timeout(Duration::from_secs(60 * 60));
+        if let Some(token) = &self.token {
+            let mut value = HeaderValue::from_str(&format!("Bearer {token}"))
+                .map_err(|_| Error::Builder("token contains invalid header bytes".into()))?;
+            value.set_sensitive(true);
+            req = req.header(AUTHORIZATION, value);
+        }
+
+        let mut response = req.send().await.map_err(|e| self.transport_error(&e))?;
+        // An SSE endpoint answers 200 and reports failure inside the stream, so
+        // a non-success status here is a genuine transport-level refusal.
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let text = response.text().await.unwrap_or_default();
+            let json = serde_json::from_str::<Value>(&text).ok();
+            return Err(self.status_error(&RawResponse {
+                status,
+                headers: HeaderMap::new(),
+                json,
+                text,
+            }));
+        }
+
+        let mut collected = Vec::new();
+        let mut buffer = Vec::new();
+        let mut last_event: Option<String> = None;
+
+        loop {
+            let chunk = match tokio::time::timeout(idle, response.chunk()).await {
+                // Nothing new for a while: the backlog is drained.
+                Err(_) => break,
+                Ok(Ok(Some(chunk))) => chunk,
+                Ok(Ok(None)) => break,
+                Ok(Err(e)) => return Err(self.transport_error(&e)),
+            };
+            buffer.extend_from_slice(&chunk);
+
+            while let Some(newline) = buffer.iter().position(|b| *b == b'\n') {
+                let line = buffer.drain(..=newline).collect::<Vec<u8>>();
+                let line = String::from_utf8_lossy(&line);
+                let line = line.trim_end_matches(['\r', '\n']);
+
+                if let Some(name) = line.strip_prefix("event:") {
+                    last_event = Some(name.trim().to_string());
+                    continue;
+                }
+                let Some(payload) = line.strip_prefix("data:") else {
+                    // `: ping` keepalives and blank separators.
+                    continue;
+                };
+                let payload = payload.trim();
+                if last_event.as_deref() == Some("error") {
+                    // `data: eof` is the ordinary end of a finished step's
+                    // stream, not a failure worth surfacing.
+                    return Ok(collected);
+                }
+                if let Ok(value) = serde_json::from_str::<T>(payload) {
+                    collected.push(value);
+                }
+            }
+        }
+        Ok(collected)
+    }
+
     /// Convenience wrapper for typed GET requests.
     pub async fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         self.request(Method::GET, path, None, &[])
