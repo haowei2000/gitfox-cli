@@ -388,9 +388,13 @@ targets were read from there rather than guessed, and the module docs in
 
 ```bash
 cargo fmt --all --check
-cargo clippy --workspace --all-targets
+RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets
 cargo test --workspace
 ```
+
+CI runs clippy with `-D warnings` on the current stable, so a local toolchain
+that has fallen behind can pass where CI does not. `rustup update` before
+trusting a green local run.
 
 Tests are layered:
 

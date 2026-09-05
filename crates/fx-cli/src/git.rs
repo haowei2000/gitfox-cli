@@ -70,8 +70,7 @@ fn current_branch() -> Option<String> {
     run(&["symbolic-ref", "--short", "HEAD"]).filter(|b| !b.is_empty() && b != "HEAD")
 }
 
-/// `origin` if it exists, otherwise whichever remote is listed first.
-
+/// Run git and return its trimmed stdout, or `None` on any failure.
 fn run(args: &[&str]) -> Option<String> {
     let output = Command::new("git").args(args).output().ok()?;
     if !output.status.success() {
