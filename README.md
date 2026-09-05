@@ -49,8 +49,11 @@ Built for `darwin-aarch64`, `darwin-x86_64`, `linux-x86_64`, `linux-aarch64`
 and `windows-x86_64`. Every release ships a `SHA256SUMS`; verify with
 `sha256sum -c SHA256SUMS`.
 
-The Linux binaries link libdbus statically, so they run in a minimal container
-with nothing installed.
+The Linux binaries link libdbus statically — their only shared-library
+dependencies are `libc`, `libm` and `libgcc_s` — so they run in a slim
+glibc-based image (`debian:*-slim`, `ubuntu`, `gcr.io/distroless/base`) with
+nothing installed. They are **not** musl builds, so Alpine and
+`distroless/static` need a source build instead.
 
 ### From source
 
