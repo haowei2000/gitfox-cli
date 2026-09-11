@@ -187,6 +187,11 @@ A green run with `--failed` is **not** an error: `steps` is empty, `count` is
 
 A response that is not JSON (a diff, a log) arrives as a JSON string.
 
+Redirects are followed for `GET` and `HEAD` only. Any other method that the
+server redirects fails with `API_ERROR`: `details.status` is the 3xx status and
+`message` names where the server pointed. Following it could resend the write
+as a `GET`, which changes nothing and still answers 200.
+
 ### `fx auth status`
 
 ```json

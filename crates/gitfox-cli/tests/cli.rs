@@ -356,6 +356,50 @@ async fn jsonl_streams_one_line_per_element() {
     assert_eq!(rows[1]["id"], 2);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_redirected_write_is_an_error_not_a_success_that_changed_nothing() {
+    // Following the 301 would resend the POST as a GET with no body, and the
+    // target answers 200: `ok: true` for a secret that was never created.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/secrets/"))
+        .respond_with(ResponseTemplate::new(301).insert_header("location", "/api/v1/secrets"))
+        .mount(&server)
+        .await;
+    Mock::given(path("/api/v1/secrets"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    let output = fx(home.path())
+        .env("GITFOX_HOST", server.uri())
+        .env("GITFOX_TOKEN", "t")
+        .args([
+            "--json",
+            "api",
+            "POST",
+            "/api/v1/secrets/",
+            "--raw-field",
+            "space_ref=ai",
+            "--raw-field",
+            "identifier=deploy_key",
+            "--raw-field",
+            "data=rotated",
+        ])
+        .output()
+        .unwrap();
+
+    let body = stdout_json(&output);
+    assert_eq!(body["ok"], false, "{body}");
+    assert_eq!(code(&output), 5);
+    assert_eq!(body["error"]["code"], "API_ERROR");
+    assert_eq!(body["error"]["details"]["status"], 301);
+    let message = body["error"]["message"].as_str().unwrap();
+    assert!(message.contains("to /api/v1/secrets;"), "{message}");
+}
+
 // ---------------------------------------------------------------------------
 // secrets
 // ---------------------------------------------------------------------------

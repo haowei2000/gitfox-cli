@@ -4,7 +4,10 @@
 use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
+use reqwest::header::{
+    ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, LOCATION,
+};
+use reqwest::redirect::Policy;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use url::Url;
@@ -43,6 +46,9 @@ pub struct GitFoxClient {
     timeout_secs: u64,
     retries: u32,
     http: reqwest::Client,
+    /// `http` with redirects switched off, for the methods `follows_redirects`
+    /// refuses.
+    http_no_redirect: reqwest::Client,
 }
 
 /// Redacted on purpose: the token must never reach a log line or an error
@@ -163,7 +169,12 @@ impl GitFoxClient {
         body: Option<&Value>,
         extra_headers: &[(String, String)],
     ) -> Result<RawResponse> {
-        let mut req = self.http.request(method, url);
+        let http = if follows_redirects(&method) {
+            &self.http
+        } else {
+            &self.http_no_redirect
+        };
+        let mut req = http.request(method.clone(), url);
         // JSON unless the caller asked for something else. The pull request
         // diff endpoint serves either JSON or a raw unified diff depending on
         // this header, which is the whole reason it is overridable.
@@ -213,10 +224,9 @@ impl GitFoxClient {
         };
 
         if status.is_success() {
-            Ok(raw)
-        } else {
-            Err(self.status_error(&raw))
+            return Ok(raw);
         }
+        Err(redirect_error(&method, &raw).unwrap_or_else(|| self.status_error(&raw)))
     }
 
     /// How long to wait before trying again, or `None` to give up.
@@ -432,18 +442,22 @@ impl GitFoxClientBuilder {
 
     pub fn build(self) -> Result<GitFoxClient> {
         let base_url = normalize_host(&self.host)?;
-        let http = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .timeout(Duration::from_secs(self.timeout_secs))
-            .danger_accept_invalid_certs(self.insecure)
-            .build()
-            .map_err(|e| Error::Builder(e.to_string()))?;
+        let http = |redirect| {
+            reqwest::Client::builder()
+                .user_agent(USER_AGENT)
+                .timeout(Duration::from_secs(self.timeout_secs))
+                .danger_accept_invalid_certs(self.insecure)
+                .redirect(redirect)
+                .build()
+                .map_err(|e| Error::Builder(e.to_string()))
+        };
         Ok(GitFoxClient {
+            http: http(Policy::default())?,
+            http_no_redirect: http(Policy::none())?,
             base_url,
             token: self.token,
             timeout_secs: self.timeout_secs,
             retries: self.retries,
-            http,
         })
     }
 }
@@ -470,6 +484,38 @@ pub fn normalize_host(host: &str) -> Result<Url> {
         url.set_path(&path);
     }
     Ok(url)
+}
+
+/// Whether a redirect may be followed for this method: only `GET` and `HEAD`.
+///
+/// Following one does not faithfully replay a write. On a 301 or 302 the HTTP
+/// client resends a `POST` as a `GET` with no body, and on a 303 it does the
+/// same to `PATCH`, `PUT` and `DELETE`; that `GET` answers 200, so a redirected
+/// create came back looking exactly like one that worked. The redirects that
+/// would replay the method are refused too, so whether a write happened never
+/// depends on which status the server chose.
+fn follows_redirects(method: &Method) -> bool {
+    matches!(*method, Method::GET | Method::HEAD)
+}
+
+/// The error for a redirect this request was not allowed to follow.
+///
+/// Names the destination rather than reporting a bare `HTTP 301`: sending the
+/// request there is usually the fix — a trailing slash, or `https://` for a
+/// host configured as `http://`.
+fn redirect_error(method: &Method, raw: &RawResponse) -> Option<Error> {
+    if follows_redirects(method) || !(300..400).contains(&raw.status) {
+        return None;
+    }
+    let location = raw.headers.get(LOCATION)?.to_str().ok()?;
+    Some(Error::Api {
+        status: raw.status,
+        message: format!(
+            "the server redirected this {method} to {location}; a request that changes \
+             data does not follow redirects, so send it there instead"
+        ),
+        body: raw.json.clone(),
+    })
 }
 
 /// Whether repeating this method is safe.
