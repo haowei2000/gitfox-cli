@@ -11,6 +11,8 @@ change; from 1.0 they are covered by the version promise. See
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-09-11
+
 ### Fixed
 
 * A write the server redirected no longer reports success. Following a `301`
