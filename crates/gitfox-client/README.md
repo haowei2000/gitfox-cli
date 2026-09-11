@@ -35,6 +35,10 @@ let prs = client
 * **Retries** — transient failures back off exponentially, but only for methods
   that are safe to repeat. `POST` and `PATCH` are never retried: repeating a
   `POST /pullreq` that already reached the server opens a second pull request.
+* **Redirects** — followed for `GET` and `HEAD` only. Following one can resend a
+  write as a `GET` with no body (a `POST` on 301/302, any write on 303), which
+  answers 200 while changing nothing, so a redirected write is an `Error::Api`
+  naming the new location.
 * **Redaction** — the token is not in `Debug` output, and the `Authorization`
   header is marked sensitive.
 

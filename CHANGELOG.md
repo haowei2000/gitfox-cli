@@ -11,6 +11,15 @@ change; from 1.0 they are covered by the version promise. See
 
 ## [Unreleased]
 
+### Fixed
+
+* A write the server redirected no longer reports success. Following a `301`
+  or `302` resent a `POST` as a `GET` with no body, and a `303` did the same to
+  `PATCH`, `PUT` and `DELETE`. The `GET` answered 200, so creating a secret with
+  `fx api POST /api/v1/secrets` could say `ok: true` while nothing was created.
+  Redirects are now followed for `GET` and `HEAD` only; any other method fails
+  with `API_ERROR`, naming the `Location` the server sent.
+
 ## [0.6.1] — 2026-09-05
 
 ### Fixed

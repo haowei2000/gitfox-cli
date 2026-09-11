@@ -341,6 +341,16 @@ that something might not have happened beats silently doing it twice. `500` is
 not retried either — an internal error that repeats is usually a bug being hit
 again, not a blip.
 
+### Writes never follow a redirect
+
+Following a redirect does not faithfully replay a write. On a `301` or `302` the
+HTTP client resends a `POST` as a `GET` with no body, and on a `303` it does the
+same to `PATCH`, `PUT` and `DELETE` — and that `GET` answers 200, so a redirected
+`POST /api/v1/secrets` reported `ok: true` while nothing was created. fx follows
+redirects for reads only. A request that changes data fails with `API_ERROR` and
+names the `Location` the server pointed at, which is usually the fix: a trailing
+slash, or `https://` for a host configured as `http://`.
+
 ## Exit codes
 
 | Code | Meaning |
