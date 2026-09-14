@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 /// fail just because one of them is missing.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct User {
+    /// The principal id — what pull request filters such as `reviewer_id`
+    /// take.
+    #[serde(default)]
+    pub id: Option<i64>,
     #[serde(default, alias = "uid", alias = "user_id")]
     pub uid: Option<String>,
     #[serde(default)]

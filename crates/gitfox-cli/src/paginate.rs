@@ -67,11 +67,86 @@ where
     }
 }
 
+/// [`collect`], for a filter the server cannot apply.
+///
+/// `--draft` and `fx run list --status` narrow what GitFox returns, so a page
+/// of `want + 1` rows can hold fewer matches than that. Pages are read at the
+/// server's maximum until `want + 1` rows *match* or the collection ends,
+/// which keeps `truncated` an observation rather than a guess even though the
+/// filtering happens here.
+pub async fn collect_filtered<T, E, F, Fut, P>(
+    want: u32,
+    keep: P,
+    mut fetch: F,
+) -> Result<Paged<T>, E>
+where
+    F: FnMut(u32, u32) -> Fut,
+    Fut: Future<Output = Result<Vec<T>, E>>,
+    P: Fn(&T) -> bool,
+{
+    let want = want.max(1) as usize;
+    let size = MAX_PAGE_SIZE;
+    let mut items: Vec<T> = Vec::new();
+    let mut page = 1u32;
+
+    loop {
+        let batch = fetch(page, size).await?;
+        let received = batch.len();
+        items.extend(batch.into_iter().filter(|item| keep(item)));
+
+        if items.len() > want {
+            items.truncate(want);
+            return Ok(Paged {
+                items,
+                truncated: true,
+            });
+        }
+        if received < size as usize {
+            return Ok(Paged {
+                items,
+                truncated: false,
+            });
+        }
+        page += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
 
     use super::*;
+
+    #[tokio::test]
+    async fn a_filter_keeps_reading_pages_until_enough_rows_match() {
+        let fake = Fake::new(450);
+        let server = &fake;
+        // Only multiples of 10 match: 45 in the whole collection.
+        let paged = collect_filtered(
+            20,
+            |n: &usize| n.is_multiple_of(10),
+            move |page, size| async move { server.page(page, size) },
+        )
+        .await
+        .unwrap();
+        assert_eq!(paged.items.len(), 20);
+        assert!(paged.truncated, "25 more matches exist");
+        assert_eq!(paged.items[19], 190);
+        // 21 matches needed → items 0..=200 → three pages of 100.
+        assert_eq!(fake.calls(), vec![(1, 100), (2, 100), (3, 100)]);
+
+        let fake = Fake::new(450);
+        let server = &fake;
+        let all = collect_filtered(
+            100,
+            |n: &usize| n.is_multiple_of(10),
+            move |page, size| async move { server.page(page, size) },
+        )
+        .await
+        .unwrap();
+        assert_eq!(all.items.len(), 45);
+        assert!(!all.truncated);
+    }
 
     /// A server holding `total` items, recording the pages it was asked for.
     struct Fake {

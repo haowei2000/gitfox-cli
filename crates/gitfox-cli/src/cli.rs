@@ -4,13 +4,30 @@
 //! purpose: clap would resolve them before `fx` gets a chance to apply the
 //! documented precedence chain. Flags land here as `Option`, and
 //! [`crate::config::resolve`] owns the chain.
+//!
+//! The tree follows gh's: the same command names, the same flags and the same
+//! short letters, so a gh invocation works against GitFox unchanged. A gh flag
+//! whose feature GitFox lacks still parses — hidden from `--help` — and
+//! answers `UNSUPPORTED` with the reason, instead of clap's "unexpected
+//! argument" or, worse, being silently ignored.
 
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
 use crate::config::Overrides;
+use crate::export::Format;
 use crate::output::OutputFormat;
+
+mod account;
+mod ci;
+mod pr;
+mod repo;
+
+pub use account::*;
+pub use ci::*;
+pub use pr::*;
+pub use repo::*;
 
 const LONG_ABOUT: &str = "\
 fx is a GitFox client with three audiences.
@@ -22,7 +39,10 @@ fx is a GitFox client with three audiences.
 `--agent` is shorthand for `--output json --non-interactive --no-color`: it
 tells fx the caller is a machine. Every command then answers with a stable
 envelope ({\"ok\":true,\"data\":…} / {\"ok\":false,\"error\":…}) and a stable exit
-code, so nothing has to be parsed out of prose.";
+code, so nothing has to be parsed out of prose.
+
+The commands, flags and `--json FIELDS` / `--jq` / `--template` output follow
+gh, so what works with `gh` works here.";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -63,9 +83,18 @@ pub struct GlobalArgs {
     #[arg(long, global = true, value_name = "FORMAT")]
     pub output: Option<OutputFormat>,
 
-    /// Shorthand for --output json
-    #[arg(long, global = true, conflicts_with = "output")]
-    pub json: bool,
+    /// JSON output. Alone: shorthand for --output json. With fields
+    /// (`--json number,title`): only those fields, shaped the way gh prints them
+    #[arg(
+        long,
+        global = true,
+        value_name = "FIELDS",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "",
+        conflicts_with = "output"
+    )]
+    pub json: Option<String>,
 
     /// The caller is a machine: --output json --non-interactive --no-color [env: GITFOX_AGENT]
     #[arg(long, global = true)]
@@ -107,10 +136,12 @@ impl GlobalArgs {
             token: self.token.clone(),
             repo: self.repo.clone(),
             org: self.org.clone(),
-            output: self.output.or(if self.json {
-                Some(OutputFormat::Json)
-            } else {
-                None
+            // Bare `--json` is the envelope. `--json FIELDS` is gh's export,
+            // which leaves the format alone — so its errors still go where the
+            // resolved format sends them.
+            output: self.output.or(match self.json.as_deref() {
+                Some("") => Some(OutputFormat::Json),
+                _ => None,
             }),
             timeout: self.timeout,
             retries: self.retries,
@@ -122,9 +153,30 @@ impl GlobalArgs {
     }
 }
 
+/// `--jq` and `--template`, on every command gh gives them to.
+#[derive(Debug, Default, Args)]
+pub struct FormatArgs {
+    /// Filter JSON output using a jq expression (needs --json FIELDS)
+    #[arg(short = 'q', long, value_name = "EXPRESSION")]
+    pub jq: Option<String>,
+
+    /// Format JSON output using a Go template (needs --json FIELDS)
+    #[arg(short = 't', long, value_name = "TEMPLATE")]
+    pub template: Option<String>,
+}
+
+impl FormatArgs {
+    pub fn format(&self) -> Format {
+        Format {
+            jq: self.jq.clone(),
+            template: self.template.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Authenticate fx with a GitFox host
+    /// Authenticate fx and git with a GitFox host
     Auth(AuthCommand),
 
     /// Make an authenticated request to any GitFox API endpoint
@@ -132,12 +184,20 @@ pub enum Command {
 Make an authenticated request to any GitFox API endpoint.
 
 This is the escape hatch: anything GitFox exposes is reachable from fx on day
-one, whether or not a dedicated command exists yet.
+one, whether or not a dedicated command exists yet. The flags are gh's.
 
-  fx api GET /api/v1/user
-  fx api POST /api/v1/foo --field name=test
-  fx api POST /api/v1/foo --body '{\"name\":\"test\"}'
-  cat payload.json | fx api POST /api/v1/foo --input -")]
+  fx api /api/v1/user
+  fx api -X POST /api/v1/foo -F count=3 -f name=test
+  fx api /api/v1/repos/{repo_ref}/pullreq --paginate --jq '.[].title'
+  cat payload.json | fx api POST /api/v1/foo --input -
+
+-F/--field sends typed values (integers, true/false/null, @file); -f/--raw-field
+always sends strings. They are the JSON body, or the query string on a GET:
+
+  fx api -X GET /api/v1/repos/{repo_ref}/pullreq -f state=merged -F limit=5
+
+{owner}, {repo}, {repo_ref} and {branch} are filled in from the current
+checkout, in the path and in -F values.")]
     Api(ApiArgs),
 
     /// Work with repositories
@@ -151,8 +211,50 @@ one, whether or not a dedicated command exists yet.
     #[command(visible_alias = "ci")]
     Pipeline(PipelineCommand),
 
+    /// View and manage pipeline runs, the way `gh run` does
+    Run(RunCommand),
+
+    /// View and manage pipelines, the way `gh workflow` does
+    Workflow(WorkflowCommand),
+
+    /// Manage space secrets
+    Secret(SecretCommand),
+
+    /// Manage repository labels
+    Label(LabelCommand),
+
+    /// Manage SSH keys on your account
+    #[command(name = "ssh-key")]
+    SshKey(SshKeyCommand),
+
+    /// List the spaces you belong to
+    Org(OrgCommand),
+
+    /// View repository protection rules
+    #[command(visible_alias = "rs")]
+    Ruleset(RulesetCommand),
+
+    /// Manage gitspaces, GitFox's cloud development environments
+    #[command(visible_alias = "cs")]
+    Codespace(CodespaceCommand),
+
+    /// Open repositories, pull requests and files in the browser
+    Browse(BrowseArgs),
+
+    /// Show pull requests that need your attention across a space
+    Status(StatusArgs),
+
+    /// Create command shortcuts
+    Alias(AliasCommand),
+
+    /// Alias for "pr checkout"
+    Co(PrCheckoutArgs),
+
     /// Read and write fx configuration
     Config(ConfigCommand),
+
+    #[command(flatten)]
+    GhOnly(GhOnlyCommand),
 
     /// Print a shell completion script
     #[command(long_about = "\
@@ -162,598 +264,135 @@ Print a shell completion script.
   fx completion zsh > ~/.zfunc/_fx
 
   # bash
-  fx completion bash > /usr/local/etc/bash_completion.d/fx
+  fx completion -s bash > /usr/local/etc/bash_completion.d/fx
 
   # fish
   fx completion fish > ~/.config/fish/completions/fx.fish")]
     Completion(CompletionArgs),
 }
 
+impl Command {
+    /// The `--jq` / `--template` the command was given, for those that take
+    /// them.
+    pub fn format(&self) -> Format {
+        match self {
+            Command::Pr(cmd) => match &cmd.command {
+                PrSubcommand::List(a) => a.format.format(),
+                PrSubcommand::View(a) => a.format.format(),
+                PrSubcommand::Checks(a) => a.format.format(),
+                PrSubcommand::Status(a) => a.format.format(),
+                _ => Format::default(),
+            },
+            Command::Repo(cmd) => match &cmd.command {
+                RepoSubcommand::List(a) => a.format.format(),
+                RepoSubcommand::View(a) => a.format.format(),
+                RepoSubcommand::ReadDir(a) => a.format.format(),
+                RepoSubcommand::ReadFile(a) => a.format.format(),
+                _ => Format::default(),
+            },
+            Command::Run(cmd) => match &cmd.command {
+                RunSubcommand::List(a) => a.format.format(),
+                RunSubcommand::View(a) => a.format.format(),
+                _ => Format::default(),
+            },
+            Command::Workflow(cmd) => match &cmd.command {
+                WorkflowSubcommand::List(a) => a.format.format(),
+                _ => Format::default(),
+            },
+            Command::Secret(cmd) => match &cmd.command {
+                SecretSubcommand::List(a) => a.format.format(),
+                _ => Format::default(),
+            },
+            Command::Label(cmd) => match &cmd.command {
+                LabelSubcommand::List(a) => a.format.format(),
+                _ => Format::default(),
+            },
+            Command::Codespace(cmd) => match &cmd.command {
+                CodespaceSubcommand::List(a) => a.format.format(),
+                CodespaceSubcommand::View(a) => a.format.format(),
+                _ => Format::default(),
+            },
+            Command::Auth(cmd) => match &cmd.command {
+                AuthSubcommand::Status(a) => Format {
+                    jq: a.jq.clone(),
+                    template: a.template.clone(),
+                },
+                _ => Format::default(),
+            },
+            _ => Format::default(),
+        }
+    }
+}
+
+/// Whatever followed a gh command GitFox has no feature for. Captured so the
+/// command can answer with the reason instead of clap's "unrecognized
+/// subcommand" — and with `-h` captured too, never a silent exit 0.
+#[derive(Debug, Args)]
+pub struct GhOnlyArgs {
+    #[arg(
+        num_args = 0..,
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        value_name = "ARGS"
+    )]
+    pub rest: Vec<String>,
+}
+
+/// gh commands for features GitFox does not have. Hidden from `--help`; each
+/// answers `UNSUPPORTED` saying why, and what to use instead when something
+/// comes close.
+#[derive(Debug, Subcommand)]
+pub enum GhOnlyCommand {
+    #[command(hide = true, disable_help_flag = true, aliases = ["agent-tasks", "agent", "agents"])]
+    AgentTask(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true)]
+    Attestation(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true)]
+    Cache(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true)]
+    Copilot(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true)]
+    Discussion(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true, aliases = ["extensions", "ext"])]
+    Extension(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true)]
+    Gist(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true, name = "gpg-key")]
+    GpgKey(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true)]
+    Issue(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true)]
+    Licenses(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true)]
+    Preview(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true)]
+    Project(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true)]
+    Release(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true)]
+    Search(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true, aliases = ["skills"])]
+    Skill(GhOnlyArgs),
+    #[command(hide = true, disable_help_flag = true)]
+    Variable(GhOnlyArgs),
+}
+
 #[derive(Debug, Args)]
 pub struct CompletionArgs {
     /// Shell to generate for
-    #[arg(value_name = "SHELL")]
-    pub shell: clap_complete::Shell,
-}
-
-// ---------------------------------------------------------------------------
-// auth
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Args)]
-pub struct AuthCommand {
-    #[command(subcommand)]
-    pub command: AuthSubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum AuthSubcommand {
-    /// Log in to a GitFox host and store the token in the OS keychain
-    Login(AuthLoginArgs),
-    /// Remove a stored token
-    Logout(AuthHostArgs),
-    /// Show the active host and whether a token is configured
-    Status(AuthHostArgs),
-}
-
-#[derive(Debug, Args)]
-pub struct AuthLoginArgs {
-    /// Host to authenticate against, e.g. git.example.com
-    #[arg(long, value_name = "HOST")]
-    pub hostname: Option<String>,
-
-    /// Read the token from stdin instead of prompting
-    #[arg(long)]
-    pub with_token: bool,
-
-    /// Overwrite an existing stored token without asking
-    #[arg(long)]
-    pub force: bool,
-}
-
-#[derive(Debug, Args)]
-pub struct AuthHostArgs {
-    /// Host to act on; defaults to the resolved host
-    #[arg(long, value_name = "HOST")]
-    pub hostname: Option<String>,
-}
-
-// ---------------------------------------------------------------------------
-// api
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Args)]
-pub struct ApiArgs {
-    /// HTTP method, or the path itself when the method is omitted
-    #[arg(value_name = "METHOD|PATH")]
-    pub method_or_path: String,
-
-    /// Endpoint path, e.g. /api/v1/user
-    #[arg(value_name = "PATH")]
-    pub path: Option<String>,
-
-    /// Body parameter `key=value`; numbers, booleans and null are detected
-    #[arg(short = 'f', long = "field", value_name = "KEY=VALUE")]
-    pub fields: Vec<String>,
-
-    /// Body parameter `key=value`, always sent as a string
-    #[arg(short = 'F', long = "raw-field", value_name = "KEY=VALUE")]
-    pub raw_fields: Vec<String>,
-
-    /// Send this JSON string as the request body
-    #[arg(long, value_name = "JSON", conflicts_with_all = ["fields", "raw_fields", "input"])]
-    pub body: Option<String>,
-
-    /// Read the JSON request body from a file, or `-` for stdin
-    #[arg(long, value_name = "FILE", conflicts_with_all = ["fields", "raw_fields", "body"])]
-    pub input: Option<String>,
-
-    /// Extra request header, e.g. -H 'X-Trace: 1'
-    #[arg(short = 'H', long = "header", value_name = "NAME: VALUE")]
-    pub headers: Vec<String>,
-
-    /// Include the response status and headers in the output
-    #[arg(short = 'i', long)]
-    pub include: bool,
-}
-
-// ---------------------------------------------------------------------------
-// repo (v0.2)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Args)]
-pub struct RepoCommand {
-    #[command(subcommand)]
-    pub command: RepoSubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum RepoSubcommand {
-    /// List repositories in a space
-    #[command(visible_alias = "ls")]
-    List(RepoListArgs),
-    /// Show a single repository
-    View(RepoViewArgs),
-    /// Clone a repository
-    Clone(RepoCloneArgs),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-#[value(rename_all = "lower")]
-pub enum RepoSort {
-    Name,
-    Created,
-    Updated,
-}
-
-impl From<RepoSort> for gitfox_client::RepoSort {
-    fn from(value: RepoSort) -> Self {
-        match value {
-            RepoSort::Name => Self::Name,
-            RepoSort::Created => Self::Created,
-            RepoSort::Updated => Self::Updated,
-        }
-    }
-}
-
-#[derive(Debug, Args)]
-pub struct RepoListArgs {
-    /// Space to list; defaults to --org, then the current repository's space,
-    /// then every space you can see
-    #[arg(value_name = "SPACE")]
-    pub space: Option<String>,
-
-    /// Only repositories whose name matches
-    #[arg(short = 'q', long, value_name = "TEXT")]
-    pub search: Option<String>,
-
-    /// Sort order
-    #[arg(long, value_name = "KEY", default_value = "name")]
-    pub sort: RepoSort,
-
-    /// Maximum number of repositories to return
-    #[arg(short = 'L', long, value_name = "N", default_value_t = 30)]
-    pub limit: u32,
-}
-
-#[derive(Debug, Args)]
-pub struct RepoViewArgs {
-    /// Repository to show; defaults to the current checkout
-    #[arg(value_name = "SPACE/NAME")]
-    pub repository: Option<String>,
-}
-
-#[derive(Debug, Args)]
-pub struct RepoCloneArgs {
-    /// Repository to clone
-    #[arg(value_name = "SPACE/NAME")]
-    pub repository: String,
-
-    /// Directory to clone into
-    #[arg(value_name = "DIRECTORY")]
-    pub directory: Option<PathBuf>,
-
-    /// Clone over SSH instead of HTTP
-    #[arg(long)]
-    pub ssh: bool,
-}
-
-// ---------------------------------------------------------------------------
-// pr (v0.3 / v0.5)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Args)]
-pub struct PrCommand {
-    #[command(subcommand)]
-    pub command: PrSubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum PrSubcommand {
-    /// List pull requests
-    #[command(visible_alias = "ls")]
-    List(PrListArgs),
-    /// Show a pull request
-    View(PrNumberArgs),
-    /// Open a pull request
-    Create(PrCreateArgs),
-    /// Merge a pull request
-    Merge(PrMergeArgs),
-    /// Check out a pull request branch locally
-    Checkout(PrNumberArgs),
-    /// Show a pull request's diff
-    Diff(PrDiffArgs),
-    /// Show the status of a pull request's checks
-    Checks(PrNumberArgs),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-#[value(rename_all = "lower")]
-pub enum PrState {
-    Open,
-    Closed,
-    Merged,
-    All,
-}
-
-impl PrState {
-    /// `all` is a CLI convenience: the API takes a repeatable `state` filter,
-    /// so it expands rather than being sent as a value.
-    pub fn expand(self) -> Vec<gitfox_client::PullRequestState> {
-        use gitfox_client::PullRequestState as S;
-        match self {
-            Self::Open => vec![S::Open],
-            Self::Closed => vec![S::Closed],
-            Self::Merged => vec![S::Merged],
-            Self::All => vec![S::Open, S::Closed, S::Merged],
-        }
-    }
-}
-
-#[derive(Debug, Args)]
-pub struct PrListArgs {
-    /// Filter by state
-    #[arg(short, long, value_name = "STATE", default_value = "open")]
-    pub state: PrState,
-
-    /// Maximum number of pull requests to return
-    #[arg(short = 'L', long, value_name = "N", default_value_t = 30)]
-    pub limit: u32,
-
-    /// Only pull requests opened by this user
-    #[arg(long, value_name = "USER")]
-    pub author: Option<String>,
-}
-
-#[derive(Debug, Args)]
-pub struct PrDiffArgs {
-    /// Pull request number; defaults to the one for the current branch
-    #[arg(value_name = "NUMBER")]
-    pub number: Option<u64>,
-
-    /// List the changed files without their patches
-    #[arg(long)]
-    pub name_only: bool,
-}
-
-#[derive(Debug, Args)]
-pub struct PrNumberArgs {
-    /// Pull request number; defaults to the one for the current branch
-    #[arg(value_name = "NUMBER")]
-    pub number: Option<u64>,
-}
-
-#[derive(Debug, Args)]
-pub struct PrCreateArgs {
-    /// Branch to merge into
-    #[arg(short = 'B', long, value_name = "BRANCH")]
-    pub base: Option<String>,
-
-    /// Branch to merge from; defaults to the current branch
-    #[arg(short = 'H', long, value_name = "BRANCH")]
-    pub head: Option<String>,
-
-    /// Pull request title
-    #[arg(short, long)]
-    pub title: Option<String>,
-
-    /// Pull request description
-    #[arg(short, long)]
-    pub body: Option<String>,
-
-    /// Take the title and body from the branch's commits
-    #[arg(long)]
-    pub fill: bool,
-
-    /// Open as a draft
-    #[arg(short, long)]
-    pub draft: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-#[value(rename_all = "kebab-case")]
-pub enum MergeMethod {
-    Merge,
-    Squash,
-    Rebase,
-    FastForward,
-}
-
-impl From<MergeMethod> for gitfox_client::MergeMethod {
-    fn from(value: MergeMethod) -> Self {
-        match value {
-            MergeMethod::Merge => Self::Merge,
-            MergeMethod::Squash => Self::Squash,
-            MergeMethod::Rebase => Self::Rebase,
-            MergeMethod::FastForward => Self::FastForward,
-        }
-    }
-}
-
-#[derive(Debug, Args)]
-pub struct PrMergeArgs {
-    /// Pull request number; defaults to the one for the current branch
-    #[arg(value_name = "NUMBER")]
-    pub number: Option<u64>,
-
-    /// Merge strategy
-    #[arg(short, long, value_name = "METHOD", default_value = "merge")]
-    pub method: MergeMethod,
-
-    /// Delete the source branch after merging
-    #[arg(short = 'D', long)]
-    pub delete_branch: bool,
-
-    /// Report whether the merge would succeed, without performing it
-    #[arg(long)]
-    pub dry_run: bool,
-}
-
-// ---------------------------------------------------------------------------
-// pipeline (v0.4)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Args)]
-pub struct PipelineCommand {
-    #[command(subcommand)]
-    pub command: PipelineSubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum PipelineSubcommand {
-    /// List pipeline runs
-    #[command(visible_alias = "ls")]
-    List(PipelineListArgs),
-    /// Show a pipeline run
-    View(PipelineRefArgs),
-    /// Print the logs of a pipeline run
-    #[command(long_about = "\
-Print the logs of a pipeline run.
-
-Logs are addressed per step, so this walks the run and fetches the steps you
-asked for. Inside a checkout with a single pipeline, none of it needs naming:
-
-  fx pipeline logs --failed      the failed steps of the most recent run
-  fx pipeline logs 182 --failed  the failed steps of run 182
-  fx pipeline logs --step test   steps whose name contains \"test\"
-
-A failed build's log is mostly progress output, and the reason it failed is at
-the end. --tail keeps that end; the response says how many lines there were in
-total, so nothing is dropped silently:
-
-  fx --agent pipeline logs --failed --tail 50")]
-    Logs(PipelineLogsArgs),
-    /// Trigger a pipeline run
-    Run(PipelineRunArgs),
-    /// Retry a pipeline run
-    Retry(PipelineRefArgs),
-}
-
-#[derive(Debug, Args)]
-pub struct PipelineListArgs {
-    /// Only runs for this pipeline
-    #[arg(long, value_name = "PIPELINE")]
-    pub pipeline: Option<String>,
-
-    /// Maximum number of runs to return
-    #[arg(short = 'L', long, value_name = "N", default_value_t = 20)]
-    pub limit: u32,
-}
-
-#[derive(Debug, Args)]
-pub struct PipelineRefArgs {
-    /// Run number; defaults to the most recent run
-    #[arg(value_name = "RUN")]
-    pub run: Option<u64>,
-
-    /// Pipeline the run belongs to; inferred when the repository has only one
-    #[arg(long, value_name = "PIPELINE")]
-    pub pipeline: Option<String>,
-}
-
-#[derive(Debug, Args)]
-pub struct PipelineLogsArgs {
-    /// Run number; defaults to the most recent run
-    #[arg(value_name = "RUN")]
-    pub run: Option<u64>,
-
-    /// Pipeline the run belongs to; inferred when the repository has only one
-    #[arg(long, value_name = "PIPELINE")]
-    pub pipeline: Option<String>,
-
-    /// Only the steps that failed — the fastest path from a red build to a fix
-    #[arg(long)]
-    pub failed: bool,
-
-    /// Only steps whose name contains this
-    #[arg(long, value_name = "STEP")]
-    pub step: Option<String>,
-
-    /// Only the last N lines of each step — build failures are at the end
-    #[arg(long, value_name = "N")]
-    pub tail: Option<u32>,
-}
-
-#[derive(Debug, Args)]
-pub struct PipelineRunArgs {
-    /// Pipeline to run
-    #[arg(value_name = "PIPELINE")]
-    pub pipeline: String,
-
-    /// Branch to run against
-    #[arg(short, long, value_name = "BRANCH")]
-    pub branch: Option<String>,
-}
-
-// ---------------------------------------------------------------------------
-// config
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Args)]
-pub struct ConfigCommand {
-    #[command(subcommand)]
-    pub command: ConfigSubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum ConfigSubcommand {
-    /// Print one configuration value
-    Get(ConfigGetArgs),
-    /// Set one configuration value
-    Set(ConfigSetArgs),
-    /// Show the resolved configuration and where each value came from
-    List,
-}
-
-#[derive(Debug, Args)]
-pub struct ConfigGetArgs {
-    /// Key, e.g. `default_host` or `hosts.git.example.com.api_url`
-    pub key: String,
-}
-
-#[derive(Debug, Args)]
-pub struct ConfigSetArgs {
-    /// Key, e.g. `default_host` or `hosts.git.example.com.api_url`
-    pub key: String,
-    /// Value to store
-    pub value: String,
+    #[arg(value_name = "SHELL", required_unless_present = "shell_flag")]
+    pub shell: Option<clap_complete::Shell>,
+
+    /// Shell to generate for, as gh spells it
+    #[arg(
+        id = "shell_flag",
+        short = 's',
+        long = "shell",
+        value_name = "SHELL",
+        conflicts_with = "shell"
+    )]
+    pub shell_flag: Option<clap_complete::Shell>,
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use clap::CommandFactory;
-
-    #[test]
-    fn command_tree_is_well_formed() {
-        Cli::command().debug_assert();
-    }
-
-    #[test]
-    fn json_flag_is_shorthand_for_output_json() {
-        let cli = Cli::try_parse_from(["fx", "--json", "api", "/api/v1/user"]).unwrap();
-        assert_eq!(cli.global.overrides().output, Some(OutputFormat::Json));
-    }
-
-    #[test]
-    fn output_flag_and_json_flag_are_mutually_exclusive() {
-        assert!(Cli::try_parse_from(["fx", "--json", "--output", "table", "api", "/x"]).is_err());
-    }
-
-    #[test]
-    fn global_flags_are_accepted_before_and_after_the_subcommand() {
-        for argv in [
-            vec![
-                "fx",
-                "--host",
-                "https://git.example.com",
-                "api",
-                "/api/v1/user",
-            ],
-            vec![
-                "fx",
-                "api",
-                "/api/v1/user",
-                "--host",
-                "https://git.example.com",
-            ],
-        ] {
-            let cli = Cli::try_parse_from(&argv).unwrap();
-            assert_eq!(cli.global.host.as_deref(), Some("https://git.example.com"));
-        }
-    }
-
-    #[test]
-    fn api_accepts_a_bare_path_or_a_method_and_a_path() {
-        let bare = Cli::try_parse_from(["fx", "api", "/api/v1/user"]).unwrap();
-        let Command::Api(args) = bare.command else {
-            panic!("expected the api subcommand")
-        };
-        assert_eq!(args.method_or_path, "/api/v1/user");
-        assert!(args.path.is_none());
-
-        let explicit = Cli::try_parse_from(["fx", "api", "POST", "/api/v1/foo"]).unwrap();
-        let Command::Api(args) = explicit.command else {
-            panic!("expected the api subcommand")
-        };
-        assert_eq!(args.method_or_path, "POST");
-        assert_eq!(args.path.as_deref(), Some("/api/v1/foo"));
-    }
-
-    #[test]
-    fn api_body_sources_are_mutually_exclusive() {
-        assert!(
-            Cli::try_parse_from(["fx", "api", "POST", "/x", "--body", "{}", "--field", "a=b"])
-                .is_err()
-        );
-        assert!(
-            Cli::try_parse_from(["fx", "api", "POST", "/x", "--body", "{}", "--input", "-"])
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn fast_forward_keeps_its_hyphen_on_the_command_line() {
-        let cli = Cli::try_parse_from(["fx", "pr", "merge", "12", "-m", "fast-forward"]).unwrap();
-        let Command::Pr(cmd) = cli.command else {
-            panic!("expected pr")
-        };
-        let PrSubcommand::Merge(args) = cmd.command else {
-            panic!("expected merge")
-        };
-        assert_eq!(args.method, MergeMethod::FastForward);
-        assert_eq!(
-            gitfox_client::MergeMethod::from(args.method).as_str(),
-            "fast-forward"
-        );
-    }
-
-    #[test]
-    fn state_all_expands_to_every_state() {
-        assert_eq!(PrState::All.expand().len(), 3);
-        assert_eq!(
-            PrState::Open.expand(),
-            vec![gitfox_client::PullRequestState::Open]
-        );
-    }
-
-    #[test]
-    fn pr_create_follows_the_gh_short_flag_convention() {
-        let cli = Cli::try_parse_from([
-            "fx",
-            "pr",
-            "create",
-            "-B",
-            "main",
-            "-H",
-            "feat/oauth",
-            "-t",
-            "feat: add OAuth",
-            "-b",
-            "body",
-        ])
-        .unwrap();
-        let Command::Pr(cmd) = cli.command else {
-            panic!("expected the pr subcommand")
-        };
-        let PrSubcommand::Create(args) = cmd.command else {
-            panic!("expected pr create")
-        };
-        assert_eq!(args.base.as_deref(), Some("main"));
-        assert_eq!(args.head.as_deref(), Some("feat/oauth"));
-        assert_eq!(args.title.as_deref(), Some("feat: add OAuth"));
-        assert_eq!(args.body.as_deref(), Some("body"));
-    }
-
-    #[test]
-    fn pr_has_a_pull_request_alias() {
-        assert!(Cli::try_parse_from(["fx", "pull-request", "list"]).is_ok());
-        assert!(Cli::try_parse_from(["fx", "pr", "ls"]).is_ok());
-    }
-
-    #[test]
-    fn agent_flag_is_global() {
-        let cli = Cli::try_parse_from(["fx", "--agent", "pr", "list"]).unwrap();
-        assert!(cli.global.agent);
-    }
-}
+mod tests;

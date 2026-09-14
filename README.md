@@ -28,8 +28,11 @@ machine never has to parse prose:
 
 ## Status
 
-**Every command in the surface is implemented.** `repo`, `pr`, `pipeline`,
-`auth`, `config`, `api` and `completion` all work against a verified GitFox API
+**fx speaks gh.** Every one of gh 2.100's 197 commands either works against
+GitFox — `pr`, `repo`, `run`, `workflow`, `secret`, `label`, `ssh-key`, `org`,
+`ruleset`, `codespace`, `browse`, `status`, `alias`, `auth`, `config`, `api` —
+with gh's flags, `--json`/`--jq`/`--template` and exit codes, or answers
+`UNSUPPORTED` with what GitFox lacks. Everything is verified against GitFox API
 v1.3.0. Lists page transparently and say when they were truncated, transient
 failures are retried, and the JSON contract is written down in
 [docs/json-schema.md](docs/json-schema.md).
@@ -103,16 +106,49 @@ Or log in interactively and let the token live in the OS keychain:
 
 ```bash
 fx auth login --hostname git.example.com
+fx auth setup-git    # and let git clone and push with it
 ```
+
+## Coming from gh
+
+Type what you would type to gh. `fx pr checks 12 && ./deploy.sh`,
+`fx run view --log-failed`, `fx pr list --json number,title --jq '.[].title'`
+and `fx api -X GET /api/v1/repos/{repo_ref}/pullreq -f state=merged` all do what
+they do in gh.
+
+What is different is what GitFox is:
+
+* **Repositories are `space/name`**, and spaces nest. `-R` and `--org` take
+  them; `fx org list` lists yours.
+* **Runs belong to pipelines.** `fx run` and `fx workflow` are gh's names over
+  GitFox pipelines, whose runs are numbered per pipeline: `fx run view 182` finds
+  the run when only one pipeline has a #182, and otherwise wants
+  `fx run view default/182`.
+* **No issues, releases, gists, discussions, projects, search or variables.**
+  Those commands answer exit 9, `UNSUPPORTED`, with the reason — and so does a
+  gh flag for a feature GitFox lacks, such as `repo list --archived`.
+* **Secrets live on spaces** (`fx secret set NAME -o SPACE`), codespaces are
+  GitFox gitspaces, and `fx pr update-branch` needs `--rebase`, the only update
+  GitFox performs.
+* **Exit codes are finer than gh's.** Failed and pending checks are 1 and 8, as
+  in gh, but authentication is 3 — gh's 4 means *not found* here. See
+  [Exit codes](#exit-codes).
+* **Bare `--json` is fx's envelope** (`fx --json pr list`); `--json FIELDS` is
+  gh's. Environment variables are `GITFOX_*`, not `GH_*`.
 
 ## Repositories
 
 ```bash
 fx repo list              # this space, or the whole instance from outside one
-fx repo list ai -q back   # search within a space
-fx repo view              # the current checkout's repository
+fx repo list ai -S back   # search within a space
+fx repo view              # the current checkout's repository, with its README
 fx repo clone ai/backend  # into ./backend
+fx repo read-file src/main.rs --ref main
 ```
+
+`create`, `delete`, `edit`, `rename`, `fork`, `sync` and `set-default` work as
+in gh. `fx repo delete` asks you to type the name, and wants `--yes` where there
+is nobody to ask.
 
 ```
 REPOSITORY   VISIBILITY  DEFAULT  UPDATED  DESCRIPTION
@@ -128,7 +164,8 @@ the column is dropped rather than filled with dashes.
 `fx repo clone` hands the URL to `git`, which keeps its own progress output and
 its own credential prompt. fx does not splice the token into the URL: that would
 write it into `.git/config`, where it outlives the command and travels with the
-checkout. Use `--ssh` to clone over SSH instead.
+checkout. Use `--ssh`, or `fx config set git_protocol ssh`, to clone over SSH
+instead; `fx auth setup-git` lets git fetch the token over HTTPS itself.
 
 ## Pull requests
 
@@ -140,7 +177,7 @@ cd ~/project
 fx pr list                       # open pull requests in this repository
 fx pr view                       # the one for the current branch
 fx pr create --fill              # title and body from the branch's commits
-fx pr merge -m squash            # merge it, squashed
+fx pr merge --squash             # merge it, squashed
 ```
 
 ```
@@ -154,8 +191,10 @@ Explicitly, for CI and agents:
 fx --agent pr list -R ai/backend --state all --limit 50
 fx --agent pr view 12
 fx --agent pr create -B main -H feat/oauth -t "feat: add OAuth" -b "Closes #4"
-fx --agent pr merge 12 -m squash --delete-branch
+fx --agent pr merge 12 --squash --delete-branch
 ```
+
+A pull request is named as in gh: `12`, `#12`, its URL, or its branch.
 
 Reviewing one:
 
@@ -163,8 +202,13 @@ Reviewing one:
 fx pr diff              # the raw patch, for your pager
 fx pr diff --name-only  # just what changed
 fx pr checks            # what CI says, and what is blocking the merge
-fx pr checkout 12       # fetch the branch and switch to it
+fx pr checkout 12       # fetch the branch and switch to it, from a fork too
+fx pr review 12 --approve -b "LGTM"
+fx pr comment 12 --body "One question inline"
+fx pr status            # yours, and the ones waiting on your review
 ```
+
+`close`, `reopen`, `ready`, `edit` and `update-branch --rebase` round it out.
 
 `fx pr diff` picks its form from the output mode: a person gets the unified
 patch their pager and highlighter understand, `--agent` gets it split by file
@@ -212,6 +256,16 @@ Inside a checkout with one pipeline, nothing needs naming: the pipeline is
 inferred, and the run defaults to the most recent. A green run answers with an
 empty `steps` and exit 0 — "nothing failed" is a result, not an error.
 
+gh's names work over the same runs:
+
+```bash
+fx run list --status failure --branch main
+fx run view --log-failed
+fx run watch --exit-status && ./deploy.sh
+fx workflow run default --ref main
+fx workflow view default --yaml
+```
+
 A failed build's log is mostly progress output and the reason is at the end, so
 `--tail N` keeps that end. Each step reports `total_lines` alongside `lines`, so
 nothing is dropped silently.
@@ -230,17 +284,27 @@ Anything GitFox exposes is reachable on day one, whether or not a dedicated
 command exists yet.
 
 ```bash
-fx api GET /api/v1/user
-fx api POST /api/v1/foo --field name=test --field count=3
-fx api POST /api/v1/foo --body '{"name":"test"}'
-cat payload.json | fx api POST /api/v1/foo --input -
-fx api GET /api/v1/user --include          # status + headers too
+fx api /api/v1/user
+fx api -X POST /api/v1/foo -F count=3 -f name=test
+fx api -X GET /api/v1/repos/{repo_ref}/pullreq -f state=merged -F limit=5
+fx api /api/v1/repos/{repo_ref}/pullreq --paginate --jq '.[].title'
+cat payload.json | fx api -X POST /api/v1/foo --input -
+fx api /api/v1/user --include              # status + headers too
 ```
 
-* The method is optional: `fx api /api/v1/user` is a `GET`, and adding a body
-  without naming a method makes it a `POST`.
-* `--field` types its values (`count=3` is a number, `draft=true` a boolean,
-  `parent=null` a null); `--raw-field` always sends a string.
+The flags are gh's:
+
+* The method is optional: `fx api /api/v1/user` is a `GET`, and sending anything
+  without naming a method makes it a `POST`. `fx api POST /path` works too.
+* `-F/--field` types its values — `count=3` is a number, `draft=true` a boolean,
+  `parent=null` a null, `body=@notes.md` a file's contents — and `-f/--raw-field`
+  always sends a string. `key[]=v`, `key[sub]=v` and `key[][sub]=v` build arrays
+  and objects.
+* They are the JSON body, except on a `GET`, and beside `--input` or `--body`,
+  where they are the query string.
+* `{owner}`, `{repo}`, `{branch}` and `{repo_ref}` — the `space%2Fname` GitFox's
+  repository paths take — come from the current checkout.
+* `--paginate` walks GitFox's `page`/`limit` pages into one array.
 
 ## Configuration
 
@@ -282,6 +346,10 @@ typo cannot silently disable TLS verification.
 
 ```toml
 default_host = "git.example.com"
+git_protocol = "https"   # or ssh
+editor = "vim"           # else $VISUAL, then $EDITOR
+browser = "firefox"      # else $BROWSER
+prompt = "enabled"       # disabled: never ask
 
 [hosts."git.example.com"]
 api_url = "https://git.example.com"
@@ -290,9 +358,16 @@ user = "whw"
 [hosts."git.internal.local"]
 api_url = "https://git.internal.local"
 insecure = true
+git_protocol = "ssh"
+
+[aliases]
+mine = "pr list --author @me"
 ```
 
-Tokens are never written here. `fx config set` cannot even address a token key.
+`fx config get | set | list` read and write it, with `-h HOST` for a host's
+keys as in gh. Tokens are never written here: `fx config set` cannot even
+address a token key. `fx repo set-default` records a checkout's repository in
+its own `.git/config`, which wins over the remotes.
 
 ### Where a token comes from
 
@@ -300,7 +375,8 @@ Tokens are never written here. `fx config set` cannot even address a token key.
 --token  >  GITFOX_TOKEN  >  OS keychain
 ```
 
-`fx auth status` reports which of the three was used — never the value.
+`fx auth status` reports which of the three was used, and prints the value only
+with `--show-token`.
 
 ## Output
 
@@ -315,6 +391,20 @@ The full contract — every command's `data` shape — is in
 
 In machine modes the whole contract is: stdout is one JSON document, and the
 exit code says whether it is a result or an error.
+
+### gh's `--json FIELDS`, `--jq` and `--template`
+
+Where gh has them, so does fx, with gh's field names and value shapes — and no
+envelope:
+
+```bash
+fx pr list --json number,title,headRefName
+fx pr view 12 --json state,mergeable --jq .state
+fx run list --json databaseId,conclusion --template '{{range .}}{{.databaseId}} {{.conclusion}}{{"\n"}}{{end}}'
+```
+
+jq is built in, and templates get gh's helpers (`tablerow`, `timeago`, `color`,
+`truncate`, …). An unknown field fails with the list of the ones that exist.
 
 ### Lists never lie about being complete
 
@@ -356,15 +446,15 @@ slash, or `https://` for a host configured as `http://`.
 | Code | Meaning |
 |---|---|
 | `0` | success |
-| `1` | unexpected internal error |
-| `2` | invalid arguments |
+| `1` | unexpected internal error — or, as in gh, a failed check or run |
+| `2` | invalid arguments, or a declined confirmation |
 | `3` | authentication error |
 | `4` | not found |
 | `5` | API error |
 | `6` | network error or timeout |
 | `7` | configuration error |
-| `8` | git context error |
-| `9` | not implemented yet |
+| `8` | git context error — or, as in gh, checks still pending |
+| `9` | not supported: a gh command or flag for a feature GitFox lacks |
 
 Full table with the matching `error.code` strings: [docs/exit-codes.md](docs/exit-codes.md).
 The JSON each command returns: [docs/json-schema.md](docs/json-schema.md).
@@ -400,17 +490,21 @@ crates/
 │   ├── client.rs     the one place a request is issued
 │   ├── error.rs      typed API errors
 │   ├── models/       domain models, deliberately not the raw API DTOs
-│   └── auth.rs · repo.rs · pull_request.rs · principal.rs · pipeline.rs
+│   └── auth.rs · repo.rs · pull_request.rs · pipeline.rs · principal.rs
+│       labels.rs · spaces.rs · rules.rs
 └── gitfox-cli/       the binary (installs as `fx`)
-    ├── cli.rs        the clap command tree
+    ├── argv.rs       aliases and gh's `--json FIELDS`, before clap parses
+    ├── cli.rs, cli/  the clap command tree
     ├── config.rs     the precedence chain (pure, heavily tested)
     ├── context.rs    resolved config + renderer + client
     ├── output.rs     Render trait, envelopes, tables
+    ├── export.rs     gh's --json FIELDS, --jq and --template
     ├── error.rs      stable error codes and exit codes
     ├── git.rs        what the surrounding checkout says
+    ├── interact.rs   prompts, editors, browsers
     ├── keychain.rs   OS keychain access
     ├── paginate.rs   walking page/limit endpoints
-    └── commands/     one module per command
+    └── commands/     one module per command, gh_only.rs for what GitFox lacks
 ```
 
 Two rules keep this from rotting:
@@ -430,6 +524,7 @@ Two rules keep this from rotting:
 | **v0.4** ✅ | `pipeline list/view/logs/run/retry`, including `logs --failed` |
 | **v0.5** ✅ | `pr checkout/diff/checks`, `pr create --fill`, shell completion |
 | **v0.6** ✅ | agent hardening: pagination, retries, non-interactive edges, schema freeze |
+| **unreleased** ✅ | gh compatibility: gh's commands, flags, `--json`/`--jq`/`--template` and exit codes |
 | [v0.7](https://github.com/haowei2000/gitfox-cli/milestone/1) | `fx-mcp`, reusing `gitfox-client` directly |
 | [v1.0](https://github.com/haowei2000/gitfox-cli/milestone/2) | CLI syntax, JSON schema, config format and exit codes all stable |
 
@@ -465,13 +560,23 @@ Tests are layered:
 * end-to-end tests over the real binary asserting the JSON envelope, the exit
   codes, and that a token never reaches stdout or stderr — not even under
   `-vvv` (`crates/gitfox-cli/tests/cli.rs`)
+* end-to-end tests typing gh's spellings and checking what reaches the server
+  and what comes back, aimed at flags that parse but mean something else
+  (`crates/gitfox-cli/tests/gh_compat.rs`)
 
 ## Security
 
 * Tokens live in the OS keychain or in the environment, never in the config file.
 * `Secret` redacts itself in `Debug` and `Display`; the `Authorization` header is
   marked sensitive so it stays out of logs.
-* `fx auth status` reports `"token": "configured"` and its source, never the value.
+* `fx auth status` reports `"token": "configured"` and its source. Two commands
+  print a token, and only because that is what you asked them for:
+  `fx auth token` and `fx auth status --show-token`, as in gh.
+* `fx auth setup-git` makes git ask `fx auth git-credential` for credentials, so
+  the token never lands in a remote URL or `.git/config`. It edits your global
+  git config, and only when you run it.
+* `fx secret set` never echoes a value; stdin or the hidden prompt keep it out of
+  your shell history, which `--body` does not.
 * `--insecure` works, and warns on stderr every time it does.
 
 ## License

@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use crate::cli::{
     PipelineCommand, PipelineListArgs, PipelineLogsArgs, PipelineRefArgs, PipelineRunArgs,
-    PipelineSubcommand,
+    PipelineSubcommand, PipelineViewArgs,
 };
 use crate::context::Context;
 use crate::error::{CliError, ErrorCode, Result};
@@ -22,7 +22,7 @@ use crate::paginate;
 /// How long to wait for more of a running step's log before calling it a
 /// snapshot. The stream stays open for as long as the step runs, so something
 /// has to decide the backlog has been drained.
-const LIVE_LOG_IDLE: std::time::Duration = std::time::Duration::from_secs(2);
+pub(crate) const LIVE_LOG_IDLE: std::time::Duration = std::time::Duration::from_secs(2);
 
 pub async fn run(cmd: PipelineCommand, ctx: &Context) -> Result<()> {
     match cmd.command {
@@ -42,7 +42,7 @@ pub async fn run(cmd: PipelineCommand, ctx: &Context) -> Result<()> {
 ///
 /// Most repositories have exactly one pipeline, so naming it every time is
 /// noise. When there are several, refusing with the list beats guessing.
-async fn resolve_pipeline(
+pub(crate) async fn resolve_pipeline(
     explicit: Option<&str>,
     repo: &RepoRef,
     client: &GitFoxClient,
@@ -72,7 +72,7 @@ async fn resolve_pipeline(
 }
 
 /// The run to act on: the number given, or the most recent one.
-async fn resolve_run(
+pub(crate) async fn resolve_run(
     explicit: Option<u64>,
     repo: &RepoRef,
     pipeline: &str,
@@ -95,7 +95,7 @@ async fn resolve_run(
     })
 }
 
-async fn list_pipelines(
+pub(crate) async fn list_pipelines(
     client: &GitFoxClient,
     repo: &RepoRef,
     latest: bool,
@@ -114,7 +114,7 @@ async fn list_pipelines(
         })
 }
 
-fn not_found_as_pipeline(err: gitfox_client::Error, pipeline: &str) -> CliError {
+pub(crate) fn not_found_as_pipeline(err: gitfox_client::Error, pipeline: &str) -> CliError {
     match err {
         gitfox_client::Error::NotFound { .. } => CliError::new(
             ErrorCode::PipelineNotFound,
@@ -183,39 +183,45 @@ async fn list(args: PipelineListArgs, ctx: &Context) -> Result<()> {
 
     runs.sort_by_key(|(_, e)| std::cmp::Reverse(e.started.or(e.created).unwrap_or(0)));
 
-    ctx.renderer
-        .emit(&RunList {
-            repo: repo.full(),
-            runs,
-            truncated,
-        })
-        .map_err(unexpected)
+    ctx.renderer.emit(&RunList {
+        repo: repo.full(),
+        runs,
+        truncated,
+    })
 }
 
 // ---------------------------------------------------------------------------
 // view
 // ---------------------------------------------------------------------------
 
-async fn view(args: PipelineRefArgs, ctx: &Context) -> Result<()> {
+async fn view(args: PipelineViewArgs, ctx: &Context) -> Result<()> {
     let repo = ctx.repo()?;
     let client = ctx.client()?;
-    let pipeline = resolve_pipeline(args.pipeline.as_deref(), &repo, &client).await?;
-    let number = resolve_run(args.run, &repo, &pipeline, &client).await?;
+    let pipeline = resolve_pipeline(args.target.pipeline.as_deref(), &repo, &client).await?;
+    let number = resolve_run(args.target.run, &repo, &pipeline, &client).await?;
     let execution = client
         .pipelines()
         .get_execution(&repo, &pipeline, number)
         .await
         .map_err(|e| not_found_as_run(e, &pipeline, number))?;
+    let failed = execution.status.is_failed();
 
-    ctx.renderer
-        .emit(&RunView {
-            pipeline,
-            execution,
-        })
-        .map_err(unexpected)
+    ctx.renderer.emit(&RunView {
+        pipeline,
+        execution,
+    })?;
+
+    // As `fx run view --exit-status`: for a person only, since JSON already
+    // carried the result.
+    if args.exit_status && failed && !ctx.renderer.is_machine() {
+        return Err(
+            CliError::new(ErrorCode::RunFailed, format!("run #{number} failed")).silenced(),
+        );
+    }
+    Ok(())
 }
 
-fn not_found_as_run(err: gitfox_client::Error, pipeline: &str, number: u64) -> CliError {
+pub(crate) fn not_found_as_run(err: gitfox_client::Error, pipeline: &str, number: u64) -> CliError {
     match err {
         gitfox_client::Error::NotFound { .. } => CliError::new(
             ErrorCode::PipelineNotFound,
@@ -243,7 +249,43 @@ async fn logs(args: PipelineLogsArgs, ctx: &Context) -> Result<()> {
         .await
         .map_err(|e| not_found_as_run(e, &pipeline, number))?;
 
-    let wanted = select_steps(&execution, &args);
+    let steps = fetch_step_logs(
+        &client,
+        &repo,
+        &pipeline,
+        number,
+        &execution,
+        args.failed,
+        args.step.as_deref(),
+        args.tail,
+    )
+    .await;
+
+    ctx.renderer.emit(&RunLogs {
+        pipeline,
+        run: number,
+        status: execution.status.as_str().to_string(),
+        only_failed: args.failed,
+        steps,
+    })
+}
+
+/// Fetch the logs of the steps `failed` / `step_filter` select.
+///
+/// A step whose log cannot be fetched still appears, marked unavailable — see
+/// [`StepLogs`] — so this never fails as a whole.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn fetch_step_logs(
+    client: &GitFoxClient,
+    repo: &RepoRef,
+    pipeline: &str,
+    number: u64,
+    execution: &Execution,
+    failed: bool,
+    step_filter: Option<&str>,
+    tail_lines: Option<u32>,
+) -> Vec<StepLogs> {
+    let wanted = select_steps(execution, failed, step_filter);
     let mut steps = Vec::with_capacity(wanted.len());
     for (stage, step) in wanted {
         // Which endpoint has the log depends on whether the step has finished.
@@ -254,8 +296,8 @@ async fn logs(args: PipelineLogsArgs, ctx: &Context) -> Result<()> {
             client
                 .pipelines()
                 .step_logs_live(
-                    &repo,
-                    &pipeline,
+                    repo,
+                    pipeline,
                     number,
                     stage.number,
                     step.number,
@@ -265,7 +307,7 @@ async fn logs(args: PipelineLogsArgs, ctx: &Context) -> Result<()> {
         } else {
             client
                 .pipelines()
-                .step_logs(&repo, &pipeline, number, stage.number, step.number)
+                .step_logs(repo, pipeline, number, stage.number, step.number)
                 .await
         };
 
@@ -286,19 +328,10 @@ async fn logs(args: PipelineLogsArgs, ctx: &Context) -> Result<()> {
             live,
             available,
             total_lines: lines.len(),
-            lines: tail(lines, args.tail),
+            lines: tail(lines, tail_lines),
         });
     }
-
-    ctx.renderer
-        .emit(&RunLogs {
-            pipeline,
-            run: number,
-            status: execution.status.as_str().to_string(),
-            only_failed: args.failed,
-            steps,
-        })
-        .map_err(unexpected)
+    steps
 }
 
 /// Keep only the last `n` lines, when asked.
@@ -320,16 +353,17 @@ fn tail(lines: Vec<LogLine>, n: Option<u32>) -> Vec<LogLine> {
 /// whose name mentions "test". With neither, every step that actually ran.
 fn select_steps<'a>(
     execution: &'a Execution,
-    args: &PipelineLogsArgs,
+    failed: bool,
+    step_filter: Option<&str>,
 ) -> Vec<(&'a Stage, &'a Step)> {
-    let needle = args.step.as_ref().map(|s| s.to_lowercase());
+    let needle = step_filter.map(str::to_lowercase);
     execution
         .steps()
         .filter(|(_, step)| {
-            if args.failed && !step.status.is_failed() {
+            if failed && !step.status.is_failed() {
                 return false;
             }
-            if !args.failed && !step.status.has_run() {
+            if !failed && !step.status.has_run() {
                 return false;
             }
             match &needle {
@@ -353,13 +387,11 @@ async fn trigger(args: PipelineRunArgs, ctx: &Context) -> Result<()> {
         .await
         .map_err(|e| not_found_as_pipeline(e, &args.pipeline))?;
 
-    ctx.renderer
-        .emit(&RunStarted {
-            pipeline: args.pipeline,
-            execution,
-            verb: "Started",
-        })
-        .map_err(unexpected)
+    ctx.renderer.emit(&RunStarted {
+        pipeline: args.pipeline,
+        execution,
+        verb: "Started",
+    })
 }
 
 async fn retry(args: PipelineRefArgs, ctx: &Context) -> Result<()> {
@@ -373,24 +405,18 @@ async fn retry(args: PipelineRefArgs, ctx: &Context) -> Result<()> {
         .await
         .map_err(|e| not_found_as_run(e, &pipeline, number))?;
 
-    ctx.renderer
-        .emit(&RunStarted {
-            pipeline,
-            execution,
-            verb: "Retried",
-        })
-        .map_err(unexpected)
-}
-
-fn unexpected(err: std::io::Error) -> CliError {
-    CliError::new(ErrorCode::Unexpected, err.to_string())
+    ctx.renderer.emit(&RunStarted {
+        pipeline,
+        execution,
+        verb: "Retried",
+    })
 }
 
 // ---------------------------------------------------------------------------
 // rendering
 // ---------------------------------------------------------------------------
 
-fn status_mark(status: &str) -> &'static str {
+pub(crate) fn status_mark(status: &str) -> &'static str {
     match status {
         "success" => "✓",
         "failure" | "error" | "killed" => "✗",
@@ -409,7 +435,7 @@ fn status_colour(status: &str) -> &'static str {
     }
 }
 
-fn paint(status: &str, color: bool) -> String {
+pub(crate) fn paint(status: &str, color: bool) -> String {
     if color {
         format!("{}{status}\x1b[0m", status_colour(status))
     } else {
@@ -417,7 +443,7 @@ fn paint(status: &str, color: bool) -> String {
     }
 }
 
-fn execution_json(pipeline: &str, execution: &Execution) -> Value {
+pub(crate) fn execution_json(pipeline: &str, execution: &Execution) -> Value {
     json!({
         "pipeline": pipeline,
         "number": execution.number,
@@ -435,10 +461,10 @@ fn execution_json(pipeline: &str, execution: &Execution) -> Value {
     })
 }
 
-struct RunList {
-    repo: String,
-    runs: Vec<(String, Execution)>,
-    truncated: bool,
+pub(crate) struct RunList {
+    pub(crate) repo: String,
+    pub(crate) runs: Vec<(String, Execution)>,
+    pub(crate) truncated: bool,
 }
 
 impl Render for RunList {
@@ -494,9 +520,9 @@ impl Render for RunList {
     }
 }
 
-struct RunView {
-    pipeline: String,
-    execution: Execution,
+pub(crate) struct RunView {
+    pub(crate) pipeline: String,
+    pub(crate) execution: Execution,
 }
 
 impl Render for RunView {
@@ -592,7 +618,7 @@ impl Render for RunView {
     }
 }
 
-struct StepLogs {
+pub(crate) struct StepLogs {
     stage_name: String,
     stage_number: i64,
     step_name: String,
@@ -634,12 +660,12 @@ impl StepLogs {
     }
 }
 
-struct RunLogs {
-    pipeline: String,
-    run: u64,
-    status: String,
-    only_failed: bool,
-    steps: Vec<StepLogs>,
+pub(crate) struct RunLogs {
+    pub(crate) pipeline: String,
+    pub(crate) run: u64,
+    pub(crate) status: String,
+    pub(crate) only_failed: bool,
+    pub(crate) steps: Vec<StepLogs>,
 }
 
 impl Render for RunLogs {
@@ -720,10 +746,10 @@ impl Render for RunLogs {
     }
 }
 
-struct RunStarted {
-    pipeline: String,
-    execution: Execution,
-    verb: &'static str,
+pub(crate) struct RunStarted {
+    pub(crate) pipeline: String,
+    pub(crate) execution: Execution,
+    pub(crate) verb: &'static str,
 }
 
 impl Render for RunStarted {
@@ -780,20 +806,10 @@ mod tests {
         .unwrap()
     }
 
-    fn args(failed: bool, step: Option<&str>) -> PipelineLogsArgs {
-        PipelineLogsArgs {
-            run: None,
-            pipeline: None,
-            failed,
-            step: step.map(str::to_string),
-            tail: None,
-        }
-    }
-
     #[test]
     fn failed_selects_only_steps_that_actually_failed() {
         let e = execution();
-        let picked = select_steps(&e, &args(true, None));
+        let picked = select_steps(&e, true, None);
         assert_eq!(picked.len(), 1);
         assert_eq!(picked[0].0.name, "build");
         assert_eq!(picked[0].1.name, "cargo test");
@@ -802,7 +818,7 @@ mod tests {
     #[test]
     fn without_failed_the_steps_that_never_ran_are_still_left_out() {
         let e = execution();
-        let picked = select_steps(&e, &args(false, None));
+        let picked = select_steps(&e, false, None);
         let names: Vec<_> = picked.iter().map(|(_, s)| s.name.as_str()).collect();
         // clone and cargo test ran; cargo clippy and ship were skipped.
         assert_eq!(names, vec!["clone", "cargo test"]);
@@ -811,11 +827,11 @@ mod tests {
     #[test]
     fn step_filter_is_a_case_insensitive_substring_and_composes_with_failed() {
         let e = execution();
-        let by_name = select_steps(&e, &args(false, Some("CARGO")));
+        let by_name = select_steps(&e, false, Some("CARGO"));
         assert_eq!(by_name.len(), 1);
         assert_eq!(by_name[0].1.name, "cargo test");
 
-        let both = select_steps(&e, &args(true, Some("clone")));
+        let both = select_steps(&e, true, Some("clone"));
         assert!(both.is_empty(), "clone succeeded, so --failed excludes it");
     }
 

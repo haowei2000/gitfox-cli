@@ -15,10 +15,13 @@ use url::form_urlencoded;
 
 use crate::auth::AuthApi;
 use crate::error::{Error, Result};
+use crate::labels::LabelsApi;
 use crate::pipeline::PipelinesApi;
 use crate::principal::PrincipalsApi;
 use crate::pull_request::PullRequestsApi;
 use crate::repo::ReposApi;
+use crate::rules::{GitspacesApi, RulesApi};
+use crate::spaces::SpacesApi;
 
 pub use reqwest::Method;
 
@@ -101,6 +104,23 @@ impl GitFoxClient {
 
     pub fn pipelines(&self) -> PipelinesApi<'_> {
         PipelinesApi::new(self)
+    }
+
+    pub fn labels(&self) -> LabelsApi<'_> {
+        LabelsApi::new(self)
+    }
+
+    /// Spaces, their secrets, the caller's SSH keys and the system config.
+    pub fn spaces(&self) -> SpacesApi<'_> {
+        SpacesApi::new(self)
+    }
+
+    pub fn rules(&self) -> RulesApi<'_> {
+        RulesApi::new(self)
+    }
+
+    pub fn gitspaces(&self) -> GitspacesApi<'_> {
+        GitspacesApi::new(self)
     }
 
     /// Resolve an API path against the host.

@@ -12,6 +12,10 @@
 //! | retry           | `POST …/executions/{execution_number}/retry` |
 //! | cancel          | `POST …/executions/{execution_number}/cancel` |
 //! | trigger a run   | `POST …/pipelines/{pipeline_identifier}/executions?branch=…` |
+//! | delete a run    | `DELETE …/executions/{execution_number}` |
+//! | view pipeline   | `GET …/pipelines/{pipeline_identifier}` |
+//! | enable/disable  | `PATCH …/pipelines/{pipeline_identifier}` with `disabled` |
+//! | definition      | `GET …/pipelines/{pipeline_identifier}/content` |
 //!
 //! Two shapes of this API drive the CLI's design:
 //!
@@ -154,6 +158,75 @@ impl<'a> PipelinesApi<'a> {
         .await
     }
 
+    /// `DELETE …/executions/{execution_number}`
+    pub async fn delete_execution(
+        &self,
+        repo: &RepoRef,
+        pipeline: &str,
+        number: u64,
+    ) -> Result<()> {
+        self.client
+            .request(
+                Method::DELETE,
+                &self.execution_path(repo, pipeline, number),
+                None,
+                &[],
+            )
+            .await
+            .map(|_| ())
+    }
+
+    /// `GET /api/v1/repos/{repo_ref}/pipelines/{pipeline_identifier}`
+    pub async fn get(&self, repo: &RepoRef, pipeline: &str) -> Result<Pipeline> {
+        self.client
+            .get_json(&self.pipeline_path(repo, pipeline))
+            .await
+    }
+
+    /// `PATCH …/pipelines/{pipeline_identifier}` with `disabled`.
+    pub async fn set_disabled(
+        &self,
+        repo: &RepoRef,
+        pipeline: &str,
+        disabled: bool,
+    ) -> Result<Pipeline> {
+        self.client
+            .request(
+                Method::PATCH,
+                &self.pipeline_path(repo, pipeline),
+                Some(&serde_json::json!({ "disabled": disabled })),
+                &[],
+            )
+            .await?
+            .deserialize()
+    }
+
+    /// `GET …/pipelines/{pipeline_identifier}/content` — the YAML definition
+    /// on the pipeline's default branch.
+    ///
+    /// GitFox sends it base64-encoded, without saying so; the document names
+    /// no encoding field. It is decoded here, and passed through unchanged if
+    /// it turns out not to be base64 of UTF-8 text.
+    pub async fn content(&self, repo: &RepoRef, pipeline: &str) -> Result<String> {
+        let value: serde_json::Value = self
+            .client
+            .get_json(&format!("{}/content", self.pipeline_path(repo, pipeline)))
+            .await?;
+        let raw = value
+            .get("content")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        Ok(decode_definition(raw))
+    }
+
+    fn pipeline_path(&self, repo: &RepoRef, pipeline: &str) -> String {
+        format!(
+            "/api/v1/repos/{}/pipelines/{}",
+            repo.encoded(),
+            urlencode(pipeline)
+        )
+    }
+
     /// `POST …/pipelines/{pipeline}/executions?branch=…`
     pub async fn trigger(
         &self,
@@ -187,9 +260,17 @@ impl<'a> PipelinesApi<'a> {
     }
 }
 
+/// A pipeline definition as GitFox sends it: base64, or — should an instance
+/// ever send it plain — the text itself.
+fn decode_definition(raw: &str) -> String {
+    crate::models::decode_base64(raw)
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .unwrap_or_else(|| raw.to_string())
+}
+
 /// Pipeline identifiers are a single path segment, so anything that would end
 /// the segment or start a query has to be escaped.
-fn urlencode(segment: &str) -> String {
+pub(crate) fn urlencode(segment: &str) -> String {
     let mut out = String::with_capacity(segment.len());
     for byte in segment.bytes() {
         match byte {
@@ -247,6 +328,16 @@ mod tests {
                 .as_str()
                 .ends_with("/pipelines/team%2Fbuild%20pipeline/executions/182")
         );
+    }
+
+    #[test]
+    fn a_definition_is_decoded_from_base64_and_plain_text_passes_through() {
+        assert_eq!(
+            decode_definition("dmVyc2lvbjogMQpraW5kOiBwaXBlbGluZQo="),
+            "version: 1\nkind: pipeline\n"
+        );
+        // Plain YAML is not valid base64 (the colon and spaces), so it stays.
+        assert_eq!(decode_definition("version: 1\n"), "version: 1\n");
     }
 
     #[test]

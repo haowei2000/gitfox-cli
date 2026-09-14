@@ -133,11 +133,21 @@ pub struct Execution {
     #[serde(default)]
     pub pipeline_uid: Option<String>,
     #[serde(default)]
+    pub pipeline_id: Option<i64>,
+    /// What caused the run: `@hook`, a user, `@cron`.
+    #[serde(default)]
+    pub trigger: Option<String>,
+    /// How many times this run has been retried.
+    #[serde(default)]
+    pub retry_count: Option<i64>,
+    #[serde(default)]
     pub created: Option<i64>,
     #[serde(default)]
     pub started: Option<i64>,
     #[serde(default)]
     pub finished: Option<i64>,
+    #[serde(default)]
+    pub updated: Option<i64>,
     #[serde(default)]
     pub stages: Vec<Stage>,
 }
@@ -194,6 +204,8 @@ impl Execution {
 /// list was asked for with `latest=true`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Pipeline {
+    #[serde(default)]
+    pub id: Option<i64>,
     #[serde(default)]
     pub identifier: String,
     #[serde(default)]

@@ -21,12 +21,18 @@ pub struct GitInfo {
     pub remotes: Vec<Remote>,
     /// The checked-out branch, absent when HEAD is detached.
     pub branch: Option<String>,
+    /// `fx repo set-default`'s choice for this checkout.
+    pub default_repo: Option<String>,
 }
+
+/// The git config key `fx repo set-default` writes, local to the checkout.
+pub const DEFAULT_REPO_KEY: &str = "fx.repo";
 
 impl GitInfo {
     pub fn to_context(&self) -> GitContext {
         GitContext {
             remotes: self.remotes.clone(),
+            default_repo: self.default_repo.clone(),
         }
     }
 }
@@ -40,6 +46,7 @@ pub fn detect() -> GitInfo {
     GitInfo {
         remotes: remotes(),
         branch: current_branch(),
+        default_repo: run(&["config", "--local", "--get", DEFAULT_REPO_KEY]),
     }
 }
 
@@ -66,7 +73,7 @@ fn remotes() -> Vec<Remote> {
         .collect()
 }
 
-fn current_branch() -> Option<String> {
+pub fn current_branch() -> Option<String> {
     run(&["symbolic-ref", "--short", "HEAD"]).filter(|b| !b.is_empty() && b != "HEAD")
 }
 
@@ -125,6 +132,29 @@ pub fn commits_between(base: &str, head: &str) -> Vec<Commit> {
     Vec::new()
 }
 
+/// `--fill-first`: the first commit's subject and body, whatever follows it.
+pub fn fill_first(commits: &[Commit]) -> Option<(String, String)> {
+    commits.first().map(|c| (c.subject.clone(), c.body.clone()))
+}
+
+/// `--fill-verbose`: the first subject as the title, and every commit's full
+/// message in the body.
+pub fn fill_verbose(commits: &[Commit]) -> Option<(String, String)> {
+    let first = commits.first()?;
+    let body = commits
+        .iter()
+        .map(|c| {
+            if c.body.is_empty() {
+                format!("* {}", c.subject)
+            } else {
+                format!("* {}\n\n{}", c.subject, c.body)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    Some((first.subject.clone(), body))
+}
+
 /// Turn a branch's commits into a pull request title and body.
 ///
 /// One commit means the pull request *is* that commit, so its subject and body
@@ -158,9 +188,10 @@ pub fn fill_from_commits(commits: &[Commit]) -> Option<(String, String)> {
 /// The URL is passed through untouched. fx never splices a token into it: that
 /// would write the credential into `.git/config`, where it outlives the command
 /// and travels with the checkout.
-pub fn clone(url: &str, destination: &Path) -> Result<(), String> {
+pub fn clone(url: &str, destination: &Path, extra: &[String]) -> Result<(), String> {
     let output = Command::new("git")
         .arg("clone")
+        .args(extra)
         .arg(url)
         .arg(destination)
         .stdout(Stdio::piped())
@@ -226,9 +257,133 @@ pub fn set_upstream(branch: &str, remote: &str) -> Result<(), String> {
     .map(|_| ())
 }
 
+/// `git checkout --detach <rev>`.
+pub fn checkout_detached(rev: &str) -> Result<(), String> {
+    run_checked(&["checkout", "--detach", rev]).map(|_| ())
+}
+
+/// Point the checked-out branch at `rev`, discarding what it had. Only for
+/// `--force`, which asks for exactly this.
+pub fn reset_hard(rev: &str) -> Result<(), String> {
+    run_checked(&["reset", "--hard", rev]).map(|_| ())
+}
+
+/// `git worktree add`, creating `branch` at `start` when `create` is set.
+pub fn worktree_add(path: &Path, branch: &str, start: &str, create: bool) -> Result<(), String> {
+    let path = path.to_string_lossy();
+    if create {
+        run_checked(&["worktree", "add", "-b", branch, &path, start]).map(|_| ())
+    } else {
+        run_checked(&["worktree", "add", &path, branch]).map(|_| ())
+    }
+}
+
+/// Bring submodules in line with the checkout, as `--recurse-submodules` asks.
+pub fn update_submodules() -> Result<(), String> {
+    run_checked(&["submodule", "sync", "--recursive"])?;
+    run_checked(&["submodule", "update", "--init", "--recursive"]).map(|_| ())
+}
+
+/// `git fetch <url> <branch>` — for a branch on a remote the checkout does not
+/// name, such as a fork's.
+pub fn fetch_url(url: &str, branch: &str) -> Result<(), String> {
+    run_checked(&["fetch", url, branch]).map(|_| ())
+}
+
+pub fn remote_url(name: &str) -> Option<String> {
+    run(&["remote", "get-url", name])
+}
+
+/// `git -C <dir> remote add <name> <url>`.
+pub fn remote_add_in(dir: &Path, name: &str, url: &str) -> Result<(), String> {
+    run_checked_in(Some(dir), &["remote", "add", name, url]).map(|_| ())
+}
+
+pub fn remote_set_url(name: &str, url: &str) -> Result<(), String> {
+    run_checked(&["remote", "set-url", name, url]).map(|_| ())
+}
+
+/// `git -C <dir> fetch <remote>`.
+pub fn fetch_remote_in(dir: &Path, remote: &str) -> Result<(), String> {
+    run_checked_in(Some(dir), &["fetch", remote]).map(|_| ())
+}
+
+/// `git -C <dir> push -u <remote> HEAD`, letting git own the terminal for its
+/// progress and credentials.
+pub fn push_head_in(dir: &Path, remote: &str) -> Result<(), String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["push", "-u", remote, "HEAD"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .output()
+        .map_err(|e| format!("could not run git: {e}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(match output.status.code() {
+        Some(code) => format!("git push exited with status {code}"),
+        None => "git push was terminated by a signal".to_string(),
+    })
+}
+
+/// Whether `dir` is inside a git work tree.
+pub fn is_work_tree(dir: &Path) -> bool {
+    run_checked_in(Some(dir), &["rev-parse", "--is-inside-work-tree"])
+        .is_ok_and(|out| out == "true")
+}
+
+pub fn delete_local_branch(branch: &str) -> Result<(), String> {
+    run_checked(&["branch", "-D", branch]).map(|_| ())
+}
+
+/// The commit a revision names.
+pub fn rev_parse(rev: &str) -> Option<String> {
+    run(&["rev-parse", "--verify", "--quiet", rev])
+}
+
+/// Whether `ancestor` is reachable from `descendant` — a fast-forward check.
+pub fn is_ancestor(ancestor: &str, descendant: &str) -> bool {
+    run_checked(&["merge-base", "--is-ancestor", ancestor, descendant]).is_ok()
+}
+
+/// Move a branch that is not checked out to `rev`.
+pub fn update_branch_ref(branch: &str, rev: &str) -> Result<(), String> {
+    run_checked(&["update-ref", &format!("refs/heads/{branch}"), rev]).map(|_| ())
+}
+
+pub fn set_local_config(key: &str, value: &str) -> Result<(), String> {
+    run_checked(&["config", "--local", key, value]).map(|_| ())
+}
+
+/// Remove a local config key. A key that was never set is not an error: the
+/// caller wanted it gone, and it is.
+pub fn unset_local_config(key: &str) -> Result<(), String> {
+    if run(&["config", "--local", "--get", key]).is_none() {
+        return Ok(());
+    }
+    run_checked(&["config", "--local", "--unset", key]).map(|_| ())
+}
+
+/// Configure a git credential helper for `url`, replacing any earlier one.
+pub fn set_credential_helper(url: &str, helper: &str) -> Result<(), String> {
+    let key = format!("credential.{url}.helper");
+    run_checked(&["config", "--global", "--replace-all", &key, ""])?;
+    run_checked(&["config", "--global", "--add", &key, helper]).map(|_| ())
+}
+
 /// Run git and keep the failure message, unlike [`run`] which discards it.
 fn run_checked(args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
+    run_checked_in(None, args)
+}
+
+fn run_checked_in(dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
+    let mut command = Command::new("git");
+    if let Some(dir) = dir {
+        command.arg("-C").arg(dir);
+    }
+    let output = command
         .args(args)
         .output()
         .map_err(|e| format!("could not run git: {e}"))?;
@@ -438,6 +593,7 @@ mod tests {
         let info = GitInfo {
             remotes: vec![parse_remote("http://10.1.1.32:3000/git/ai/backend.git").unwrap()],
             branch: Some("feat/oauth".into()),
+            default_repo: None,
         };
         let ctx = info.to_context();
         assert_eq!(ctx.api_base().as_deref(), Some("http://10.1.1.32:3000"));
@@ -455,6 +611,7 @@ mod tests {
         let ctx = GitInfo {
             remotes: vec![parse_remote("git@github.com:haowei2000/gitfox-cli.git").unwrap()],
             branch: None,
+            default_repo: None,
         }
         .to_context();
         assert_eq!(ctx.repo_for(Some("10.1.1.32")), None);
@@ -476,6 +633,7 @@ mod tests {
                 parse_remote("ssh://git@10.1.1.32:3322/ai-repos/GrantNexus.git").unwrap(),
             ],
             branch: None,
+            default_repo: None,
         }
         .to_context();
         assert_eq!(
@@ -489,6 +647,7 @@ mod tests {
         let ctx = GitInfo {
             remotes: vec![parse_remote("git@10.1.1.32:ai/backend.git").unwrap()],
             branch: None,
+            default_repo: None,
         }
         .to_context();
         // Nothing to compare against, so nothing is assumed.

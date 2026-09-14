@@ -133,6 +133,67 @@ pub struct PullRequest {
     pub merge_conflicts: Vec<String>,
     #[serde(default)]
     pub merge_method: Option<MergeMethod>,
+    /// The head commit of the source branch.
+    #[serde(default)]
+    pub source_sha: Option<String>,
+    /// The target branch commit the merge check was computed against.
+    #[serde(default)]
+    pub merge_target_sha: Option<String>,
+    #[serde(default)]
+    pub merge_base_sha: Option<String>,
+    #[serde(default)]
+    pub edited: Option<i64>,
+    #[serde(default)]
+    pub labels: Vec<PullRequestLabel>,
+    /// Present when the list was asked for with `include_checks=true`.
+    #[serde(default)]
+    pub check_summary: Option<CheckCountSummary>,
+}
+
+/// A label as it is attached to a pull request: the label's key and, for a
+/// label with values, the value chosen.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct PullRequestLabel {
+    #[serde(default)]
+    pub id: Option<i64>,
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub value_id: Option<i64>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub value_color: Option<String>,
+    #[serde(default)]
+    pub scope: Option<i64>,
+}
+
+impl PullRequestLabel {
+    /// `key`, or `key:value` for a label with a value — the spelling
+    /// `--label` takes back.
+    pub fn name(&self) -> String {
+        match self.value.as_deref().filter(|v| !v.is_empty()) {
+            Some(value) => format!("{}:{value}", self.key),
+            None => self.key.clone(),
+        }
+    }
+}
+
+/// How many checks on the head commit are in each state.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct CheckCountSummary {
+    #[serde(default)]
+    pub error: i64,
+    #[serde(default)]
+    pub failure: i64,
+    #[serde(default)]
+    pub pending: i64,
+    #[serde(default)]
+    pub running: i64,
+    #[serde(default)]
+    pub success: i64,
 }
 
 impl PullRequest {
@@ -164,6 +225,16 @@ pub struct CreatePullRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_repo_ref: Option<String>,
     pub is_draft: bool,
+}
+
+/// The body of `PATCH /repos/{repo_ref}/pullreq/{n}`. GitFox edits only the
+/// title and the description here; everything else has its own endpoint.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct UpdatePullRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// The body of `POST /repos/{repo_ref}/pullreq/{n}/merge`.
