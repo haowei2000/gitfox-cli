@@ -9,12 +9,15 @@
 //! GitFox itself lives behind `gitfox-client`, so an MCP server can later reuse
 //! the same implementation instead of shelling out to this binary.
 
+mod argv;
 mod cli;
 mod commands;
 mod config;
 mod context;
 mod error;
+mod export;
 mod git;
+mod interact;
 mod keychain;
 mod output;
 mod paginate;
@@ -23,22 +26,33 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
+use crate::argv::Invocation;
 use crate::cli::{Cli, GlobalArgs};
 use crate::config::{ENV_AGENT, ENV_OUTPUT, EnvSource, SystemEnv, parse_bool};
 use crate::error::CliError;
+use crate::export::ExportSpec;
 use crate::output::{OutputFormat, Renderer};
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let args = match argv::prepare(std::env::args_os().collect()) {
+        Invocation::Args(args) => args,
+        Invocation::Shell { script, args } => return run_shell_alias(&script, &args),
+    };
+    let cli = Cli::parse_from(args);
     init_tracing(cli.global.verbose);
 
-    let ctx = match context::Context::build(&cli.global) {
+    let mut ctx = match context::Context::build(&cli.global) {
         Ok(ctx) => ctx,
         // Configuration failed, so there is no resolved renderer yet; fall back
         // to what the flags and environment say about the caller.
         Err(err) => return fail(&fallback_renderer(&cli.global), &err),
     };
+
+    match ExportSpec::resolve(cli.global.json.as_deref(), cli.command.format()) {
+        Ok(spec) => ctx.renderer.set_export(spec),
+        Err(err) => return fail(&ctx.renderer, &err),
+    }
 
     match commands::dispatch(cli.command, &ctx).await {
         Ok(()) => ExitCode::SUCCESS,
@@ -52,16 +66,40 @@ fn fail(renderer: &Renderer, err: &CliError) -> ExitCode {
     ExitCode::from(err.exit_code() as u8)
 }
 
+/// Run a `!` alias through the shell, the alias's arguments as `$1`, `$2`….
+fn run_shell_alias(script: &str, args: &[String]) -> ExitCode {
+    let (shell, flag) = if cfg!(windows) {
+        ("sh.exe", "-c")
+    } else {
+        ("sh", "-c")
+    };
+    match std::process::Command::new(shell)
+        .arg(flag)
+        .arg(script)
+        .arg("fx-alias")
+        .args(args)
+        .status()
+    {
+        Ok(status) => ExitCode::from(status.code().unwrap_or(1).clamp(0, 255) as u8),
+        Err(err) => {
+            let _ = fail(
+                &Renderer::new(OutputFormat::Table, false),
+                &CliError::config(format!("could not run the shell for this alias: {err}")),
+            );
+            ExitCode::from(7)
+        }
+    }
+}
+
 /// A best-effort renderer for errors raised before configuration resolved.
 fn fallback_renderer(global: &GlobalArgs) -> Renderer {
     let env = SystemEnv;
     let agent = global.agent || env.get(ENV_AGENT).is_some_and(|v| parse_bool(&v));
     let format = global
         .output
-        .or(if global.json {
-            Some(OutputFormat::Json)
-        } else {
-            None
+        .or(match global.json.as_deref() {
+            Some("") => Some(OutputFormat::Json),
+            _ => None,
         })
         .or_else(|| env.get(ENV_OUTPUT).and_then(|v| v.parse().ok()))
         .unwrap_or(if agent {

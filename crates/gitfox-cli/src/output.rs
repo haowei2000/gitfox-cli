@@ -12,6 +12,8 @@
 //! * `--output jsonl` — one bare JSON value per line on success (built for
 //!   streaming into `jq`/`xargs`); a single enveloped error object on failure.
 //! * `--output table` — human text on stdout, errors on stderr.
+//!
+//! `--json FIELDS` (gh's form) sits beside all three: see [`crate::export`].
 
 use std::fmt;
 use std::io::{self, Write};
@@ -19,7 +21,8 @@ use std::str::FromStr;
 
 use serde_json::{Value, json};
 
-use crate::error::CliError;
+use crate::error::{CliError, unexpected};
+use crate::export::{self, ExportSpec};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 #[value(rename_all = "lower")]
@@ -80,6 +83,18 @@ pub trait Render {
     fn to_jsonl(&self) -> Vec<Value> {
         vec![self.to_json()]
     }
+
+    /// The field names `--json FIELDS` accepts here. Empty — the default —
+    /// means the command has no gh-style field selection.
+    fn export_fields(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// The value restricted to `fields`, which have already been checked
+    /// against [`Render::export_fields`]: one object, or an array of them.
+    fn export(&self, _fields: &[String]) -> Value {
+        Value::Null
+    }
 }
 
 /// A bare JSON value, rendered as pretty JSON for humans too.
@@ -109,15 +124,82 @@ impl Render for Json {
 pub struct Renderer {
     format: OutputFormat,
     color: bool,
+    /// Whether stdout is a terminal — gh-style exports indent only there.
+    tty: bool,
+    export: Option<ExportSpec>,
 }
 
 impl Renderer {
     pub fn new(format: OutputFormat, color: bool) -> Self {
-        Self { format, color }
+        use std::io::IsTerminal;
+        Self {
+            format,
+            color,
+            tty: io::stdout().is_terminal(),
+            export: None,
+        }
     }
 
-    pub fn emit<T: Render>(&self, value: &T) -> io::Result<()> {
-        forgive_broken_pipe(self.write(value))
+    /// Switch to gh-style output for this invocation.
+    pub fn set_export(&mut self, export: Option<ExportSpec>) {
+        self.export = export;
+    }
+
+    /// The gh-style export being asked for, if any — commands consult this to
+    /// fetch only the extra data the requested fields need.
+    pub fn export_spec(&self) -> Option<&ExportSpec> {
+        self.export.as_ref()
+    }
+
+    pub fn format(&self) -> OutputFormat {
+        self.format
+    }
+
+    pub fn color(&self) -> bool {
+        self.color
+    }
+
+    pub fn is_tty(&self) -> bool {
+        self.tty
+    }
+
+    /// Whether a machine is reading: a JSON format, or a gh-style export.
+    pub fn is_machine(&self) -> bool {
+        self.format.is_machine() || self.export.is_some()
+    }
+
+    pub fn emit<T: Render>(&self, value: &T) -> crate::error::Result<()> {
+        if let Some(spec) = &self.export {
+            spec.validate(value.export_fields())?;
+            let exported = value.export(&spec.fields);
+            // `jsonl` streams an exported array one element per line, as it
+            // does the envelope's items.
+            if self.format == OutputFormat::Jsonl && spec.jq.is_none() && spec.template.is_none() {
+                let rows = match exported {
+                    Value::Array(items) => items,
+                    other => vec![other],
+                };
+                let text: String = rows
+                    .iter()
+                    .map(|row| format!("{}\n", serde_json::to_string(row).unwrap_or_default()))
+                    .collect();
+                return self.write_str(&text);
+            }
+            let text = export::render(spec, &exported, self.tty, self.color)?;
+            return self.write_str(&text);
+        }
+        forgive_broken_pipe(self.write(value)).map_err(unexpected)
+    }
+
+    /// Write text to stdout exactly as given.
+    pub fn write_str(&self, text: &str) -> crate::error::Result<()> {
+        self.write_bytes(text.as_bytes())
+    }
+
+    /// Write bytes to stdout exactly as given — file contents, a script.
+    pub fn write_bytes(&self, bytes: &[u8]) -> crate::error::Result<()> {
+        let mut out = io::stdout().lock();
+        forgive_broken_pipe(out.write_all(bytes).and_then(|()| out.flush())).map_err(unexpected)
     }
 
     fn write<T: Render>(&self, value: &T) -> io::Result<()> {
@@ -156,6 +238,9 @@ impl Renderer {
             return out.flush();
         }
 
+        if err.silent {
+            return Ok(());
+        }
         let mut err_out = io::stderr().lock();
         let (red, dim, reset) = if self.color {
             ("\x1b[31m", "\x1b[2m", "\x1b[0m")
@@ -214,11 +299,7 @@ pub fn plain_table(headers: &[&str], rows: &[Vec<String>]) -> String {
 pub fn relative_time(epoch: i64) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    let seconds = if epoch.abs() > 100_000_000_000 {
-        epoch / 1000
-    } else {
-        epoch
-    };
+    let seconds = export::epoch_seconds(epoch);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)

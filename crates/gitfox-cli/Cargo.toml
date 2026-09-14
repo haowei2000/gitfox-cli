@@ -34,6 +34,12 @@ comfy-table = "8.0.0"
 dialoguer = "0.12.0"
 directories = "6.0.0"
 gitfox-client.workspace = true
+# `--template`: Go's text/template, which is what gh's --template speaks.
+gtmpl-ng = "0.7.7"
+# `--jq`: a jq implementation, so `--jq` needs no jq on PATH.
+jaq-core = "3.1.1"
+jaq-json = "2.0.3"
+jaq-std = "3.0.3"
 keyring = { version = "3.6.3", features = [
     "apple-native",
     "sync-secret-service",

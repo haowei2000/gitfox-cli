@@ -22,6 +22,13 @@ impl<'a> PrincipalsApi<'a> {
         self.client.get_json(&q.apply("/api/v1/principals")).await
     }
 
+    /// `GET /api/v1/principals/{id}`
+    pub async fn get(&self, id: i64) -> Result<Principal> {
+        self.client
+            .get_json(&format!("/api/v1/principals/{id}"))
+            .await
+    }
+
     /// Resolve a login to a principal id.
     ///
     /// The pull request filters take numeric ids, but nobody knows their

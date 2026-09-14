@@ -164,6 +164,9 @@ pub struct Overrides {
 #[derive(Debug, Default, Clone)]
 pub struct GitContext {
     pub remotes: Vec<crate::git::Remote>,
+    /// What `fx repo set-default` recorded for this checkout. Explicit, so it
+    /// outranks whatever the remotes suggest.
+    pub default_repo: Option<String>,
 }
 
 impl GitContext {
@@ -184,6 +187,9 @@ impl GitContext {
     /// host is not this GitFox instance has nothing to say about which
     /// repository is meant.
     pub fn repo_for(&self, host_key: Option<&str>) -> Option<String> {
+        if let Some(repo) = &self.default_repo {
+            return Some(repo.clone());
+        }
         let host_key = host_key?;
         self.remotes
             .iter()
@@ -231,8 +237,28 @@ impl Tty {
 pub struct ConfigFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_host: Option<String>,
+    /// `https` or `ssh`: how `fx repo clone` and friends talk to git. The same
+    /// key gh uses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_protocol: Option<String>,
+    /// The editor for `--editor` flows; falls back to `$VISUAL`, `$EDITOR`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor: Option<String>,
+    /// The browser for `--web`; falls back to `$BROWSER`, then the platform's
+    /// opener.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pager: Option<String>,
+    /// `enabled` or `disabled`; `disabled` means never prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub hosts: BTreeMap<String, HostConfig>,
+    /// `fx alias set` shortcuts: name → expansion. A leading `!` runs the
+    /// expansion through the shell.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub aliases: BTreeMap<String, String>,
 }
 
 /// Per-host settings. Tokens are deliberately absent: they live in the OS
@@ -245,6 +271,8 @@ pub struct HostConfig {
     pub user: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub insecure: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_protocol: Option<String>,
 }
 
 impl ConfigFile {
@@ -330,6 +358,10 @@ pub struct Resolved {
     pub agent: bool,
     pub non_interactive: bool,
     pub color: bool,
+    /// `https` or `ssh`, from the host's entry, then the top-level key.
+    pub git_protocol: Option<String>,
+    pub editor: Option<String>,
+    pub browser: Option<String>,
 }
 
 /// Apply the precedence chain. Pure: same inputs, same output, no I/O.
@@ -418,8 +450,14 @@ pub fn resolve(
             .unwrap_or(false);
 
     // Anything that is not a live terminal is non-interactive: a prompt there
-    // would hang CI forever instead of failing.
-    let non_interactive = cli.non_interactive || agent || !tty.stdin || !tty.stdout;
+    // would hang CI forever instead of failing. `prompt = "disabled"` is the
+    // same promise made in the config file.
+    let prompts_disabled = file
+        .prompt
+        .as_deref()
+        .is_some_and(|p| p.eq_ignore_ascii_case("disabled"));
+    let non_interactive =
+        cli.non_interactive || agent || prompts_disabled || !tty.stdin || !tty.stdout;
 
     let color = !(cli.no_color || agent || env.is_set(ENV_NO_COLOR) || !tty.stdout)
         && output == OutputFormat::Table;
@@ -430,6 +468,12 @@ pub fn resolve(
         .or_else(|| env.get(ENV_REPO))
         // Only from a remote that actually points at this instance.
         .or_else(|| git.repo_for(host_key.as_deref()));
+
+    let git_protocol = host_key
+        .as_deref()
+        .and_then(|key| file.hosts.get(key))
+        .and_then(|h| h.git_protocol.clone())
+        .or_else(|| file.git_protocol.clone());
 
     Ok(Resolved {
         host,
@@ -445,6 +489,9 @@ pub fn resolve(
         agent,
         non_interactive,
         color,
+        git_protocol,
+        editor: file.editor.clone(),
+        browser: file.browser.clone(),
     })
 }
 
@@ -490,6 +537,7 @@ mod tests {
                 .iter()
                 .filter_map(|u| crate::git::parse_remote(u))
                 .collect(),
+            default_repo: None,
         }
     }
 

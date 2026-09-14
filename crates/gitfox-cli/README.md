@@ -45,6 +45,13 @@ fx pr create --fill
 fx pipeline logs --failed --tail 50
 ```
 
+## Coming from gh
+
+fx takes gh's commands, flags and exit codes: `fx pr checks && ./deploy.sh`,
+`fx run view --log-failed`, `fx pr list --json number,title --jq '.[].title'`.
+A gh command for something GitFox does not have — issues, releases, gists —
+answers exit 9 with the reason rather than failing to parse.
+
 ## Why it suits an agent
 
 * One JSON envelope and one error-code table, both documented and stable.

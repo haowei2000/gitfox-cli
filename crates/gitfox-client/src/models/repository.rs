@@ -50,9 +50,49 @@ pub struct Repository {
     pub created: Option<i64>,
     #[serde(default)]
     pub updated: Option<i64>,
+    /// The repository this one was forked from; `0` or absent for a source
+    /// repository.
+    #[serde(default)]
+    pub fork_id: Option<i64>,
+    /// The id of the space the repository lives in.
+    #[serde(default)]
+    pub parent_id: Option<i64>,
+    #[serde(default)]
+    pub mirror: Option<bool>,
+    #[serde(default)]
+    pub num_closed_pulls: Option<i64>,
+    #[serde(default)]
+    pub num_merged_pulls: Option<i64>,
+}
+
+/// The body of `POST /api/v1/repos`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CreateRepository {
+    pub identifier: String,
+    /// The space to create it in.
+    pub parent_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_branch: Option<String>,
+    pub is_public: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub readme: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_ignore: Option<String>,
+    /// Makes the new repository a fork of the repository with this id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fork_id: Option<i64>,
 }
 
 impl Repository {
+    /// Whether this repository is a fork of another.
+    pub fn is_fork(&self) -> bool {
+        self.fork_id.is_some_and(|id| id > 0)
+    }
+
     /// `ai/backend` — the reference a user would type back into `-R`.
     pub fn reference(&self) -> String {
         self.path

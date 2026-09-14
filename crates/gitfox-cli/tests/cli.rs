@@ -824,22 +824,44 @@ async fn pr_merge_dry_run_reports_mergeability_without_merging() {
         .await;
 
     let home = TempDir::new().unwrap();
+    // gh's spelling and fx's own name for the same strategy.
+    for strategy in [vec!["--squash"], vec!["--method", "squash"]] {
+        let mut args = vec!["--agent", "pr", "merge", "12", "--dry-run"];
+        args.extend(strategy.iter().copied());
+        let output = fx(home.path())
+            .env("GITFOX_HOST", server.uri())
+            .env("GITFOX_TOKEN", "t")
+            .env("GITFOX_REPO", "ai/backend")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(
+            code(&output),
+            0,
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let data = &stdout_json(&output)["data"];
+        assert_eq!(data["merged"], false);
+        assert_eq!(data["mergeable"], true);
+    }
+
+    // `-m squash` was fx 0.6's spelling; `-m` is gh's --merge now, and the
+    // old form says so instead of looking for a branch called `squash`.
     let output = fx(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
-        .args(["--agent", "pr", "merge", "12", "-m", "squash", "--dry-run"])
+        .args(["--agent", "pr", "merge", "-m", "squash"])
         .output()
         .unwrap();
-    assert_eq!(
-        code(&output),
-        0,
-        "{}",
-        String::from_utf8_lossy(&output.stdout)
+    assert_eq!(code(&output), 2);
+    let error = &stdout_json(&output)["error"];
+    assert_eq!(error["code"], "INVALID_ARGUMENT");
+    assert!(
+        error["message"].as_str().unwrap().contains("--merge"),
+        "{error}"
     );
-    let data = &stdout_json(&output)["data"];
-    assert_eq!(data["merged"], false);
-    assert_eq!(data["mergeable"], true);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2117,7 +2139,53 @@ async fn pr_checkout_fetches_the_branch_and_switches_to_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn pr_checkout_refuses_a_fork_rather_than_guessing() {
+async fn pr_checkout_fetches_a_forks_branch_from_the_fork() {
+    let home = TempDir::new().unwrap();
+    let init = |dir: &Path| {
+        git(dir, &["config", "user.email", "t@example.com"]);
+        git(dir, &["config", "user.name", "Test"]);
+    };
+
+    // The upstream repository, where the pull request targets…
+    let upstream = home.path().join("upstream");
+    std::fs::create_dir(&upstream).unwrap();
+    git(&upstream, &["init", "-q", "-b", "main"]);
+    init(&upstream);
+    git(
+        &upstream,
+        &["commit", "-q", "--allow-empty", "-m", "initial"],
+    );
+
+    // …a fork of it, where the branch lives…
+    let fork = home.path().join("fork");
+    git(
+        home.path(),
+        &[
+            "clone",
+            "-q",
+            upstream.to_str().unwrap(),
+            fork.to_str().unwrap(),
+        ],
+    );
+    init(&fork);
+    git(&fork, &["checkout", "-q", "-b", "feat/oauth"]);
+    std::fs::write(fork.join("oauth.rs"), "fn main() {}").unwrap();
+    git(&fork, &["add", "oauth.rs"]);
+    git(&fork, &["commit", "-q", "-m", "feat: add OAuth"]);
+
+    // …and a clone of the upstream, which has never heard of the branch.
+    let work = home.path().join("work");
+    git(
+        home.path(),
+        &[
+            "clone",
+            "-q",
+            upstream.to_str().unwrap(),
+            work.to_str().unwrap(),
+        ],
+    );
+    init(&work);
+
     let server = MockServer::start().await;
     let mut pr = sample_pr(12);
     pr["source_repo_id"] = json!(2);
@@ -2127,9 +2195,18 @@ async fn pr_checkout_refuses_a_fork_rather_than_guessing() {
         .respond_with(ResponseTemplate::new(200).set_body_json(pr))
         .mount(&server)
         .await;
+    // The fork is looked up by id, which is how GitFox names it in a PR.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 2, "path": "me/backend", "git_url": fork.to_str().unwrap()
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
 
-    let home = TempDir::new().unwrap();
     let output = fx(home.path())
+        .current_dir(&work)
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -2137,12 +2214,19 @@ async fn pr_checkout_refuses_a_fork_rather_than_guessing() {
         .output()
         .unwrap();
 
-    assert_eq!(code(&output), 8, "git context error");
-    let error = &stdout_json(&output)["error"];
-    assert_eq!(error["code"], "GIT_CONTEXT_ERROR");
+    assert_eq!(
+        code(&output),
+        0,
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let data = &stdout_json(&output)["data"];
+    assert_eq!(data["branch"], "feat/oauth");
+    assert_eq!(data["remote"], "me/backend", "fetched from the fork");
     assert!(
-        error["message"].as_str().unwrap().contains("fork"),
-        "{error}"
+        work.join("oauth.rs").exists(),
+        "the fork's commit is checked out"
     );
 }
 

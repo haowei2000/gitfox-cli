@@ -21,11 +21,14 @@
 pub mod auth;
 pub mod client;
 pub mod error;
+pub mod labels;
 pub mod models;
 pub mod pipeline;
 pub mod principal;
 pub mod pull_request;
 pub mod repo;
+pub mod rules;
+pub mod spaces;
 
 pub use client::{
     DEFAULT_RETRIES, DEFAULT_TIMEOUT_SECS, GitFoxClient, GitFoxClientBuilder, Method, Query,
@@ -33,9 +36,15 @@ pub use client::{
 };
 pub use error::{Error, Result};
 pub use models::{
-    Check, CiStatus, CreatePullRequest, Execution, FileDiff, LogLine, MergeMethod,
-    MergePullRequest, MergeResult, Pipeline, Principal, PullRequest, PullRequestCheck,
-    PullRequestChecks, PullRequestState, PullRequestStats, RepoRef, Repository, Stage, Step, User,
+    Check, CheckCountSummary, CiStatus, CodeComment, Commit, Content, ContentEntry, CreateGitspace,
+    CreatePullRequest, CreateRepository, Execution, FileDiff, Gitspace, GitspaceInstance, Identity,
+    LABEL_COLORS, Label, LabelAssignment, LabelInput, LabelValue, LabelValueInfo, LicenseTemplate,
+    LogLine, Membership, MergeMethod, MergePullRequest, MergeResult, Pipeline, Principal,
+    PublicKey, PullRequest, PullRequestActivity, PullRequestCheck, PullRequestChecks,
+    PullRequestLabel, PullRequestLabels, PullRequestReviewer, PullRequestState, PullRequestStats,
+    RepoRef, Repository, ReviewDecision, Rule, Signature, Space, SpaceSecret, Stage, Step,
+    SystemConfig, UpdatePullRequest, User, decode_base64, encode_base64, label_color,
+    label_color_hex,
 };
 pub use pull_request::PullRequestFilter;
 pub use repo::RepoSort;

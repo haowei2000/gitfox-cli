@@ -11,7 +11,7 @@ pub type Result<T> = std::result::Result<T, CliError>;
 // Every variant is part of the published contract (`docs/exit-codes.md`).
 // `NotImplemented` currently has no caller — every command in the surface is
 // wired up — but it stays: removing a documented code would break a consumer
-// that switches on the full set, and the next roadmap command will want it.
+// that switches on the full set.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCode {
@@ -29,6 +29,18 @@ pub enum ErrorCode {
     ConfigError,
     GitContextError,
     NotImplemented,
+    /// A gh flag or command whose feature GitFox does not have.
+    Unsupported,
+    /// `fx pr checks`: a check failed. Exit 1, as `gh pr checks` does.
+    ChecksFailed,
+    /// `fx pr checks`: checks are still running. Exit 8, as `gh pr checks`
+    /// does.
+    ChecksPending,
+    /// `fx run view|watch --exit-status`: the run did not succeed. Exit 1, as
+    /// gh does.
+    RunFailed,
+    /// A confirmation was declined.
+    Cancelled,
     Unexpected,
 }
 
@@ -50,22 +62,32 @@ impl ErrorCode {
             Self::ConfigError => "CONFIG_ERROR",
             Self::GitContextError => "GIT_CONTEXT_ERROR",
             Self::NotImplemented => "NOT_IMPLEMENTED",
+            Self::Unsupported => "UNSUPPORTED",
+            Self::ChecksFailed => "CHECKS_FAILED",
+            Self::ChecksPending => "CHECKS_PENDING",
+            Self::RunFailed => "RUN_FAILED",
+            Self::Cancelled => "CANCELLED",
             Self::Unexpected => "UNEXPECTED",
         }
     }
 
     /// The process exit code. See `docs/exit-codes.md`.
+    ///
+    /// `CHECKS_FAILED`, `CHECKS_PENDING` and `RUN_FAILED` reuse the numbers gh
+    /// gives the same outcomes, so a script ported from gh keeps working; the
+    /// `error.code` string is what tells them apart from `UNEXPECTED` and
+    /// `GIT_CONTEXT_ERROR`.
     pub fn exit_code(self) -> i32 {
         match self {
-            Self::Unexpected => 1,
-            Self::InvalidArgument => 2,
+            Self::Unexpected | Self::ChecksFailed | Self::RunFailed => 1,
+            Self::InvalidArgument | Self::Cancelled => 2,
             Self::AuthRequired | Self::AuthFailed => 3,
             Self::NotFound | Self::RepoNotFound | Self::PrNotFound | Self::PipelineNotFound => 4,
             Self::ApiError => 5,
             Self::NetworkError | Self::Timeout | Self::RateLimited => 6,
             Self::ConfigError => 7,
-            Self::GitContextError => 8,
-            Self::NotImplemented => 9,
+            Self::GitContextError | Self::ChecksPending => 8,
+            Self::NotImplemented | Self::Unsupported => 9,
         }
     }
 }
@@ -77,6 +99,10 @@ pub struct CliError {
     pub details: Option<Value>,
     /// Shown to humans only; never part of the JSON contract.
     pub hint: Option<String>,
+    /// The command already printed everything a person needs, and only the
+    /// exit code is left to report — `gh pr checks` with a red check prints its
+    /// table and exits 1 without an extra line. Machine output is unaffected.
+    pub silent: bool,
 }
 
 impl CliError {
@@ -86,6 +112,7 @@ impl CliError {
             message: message.into(),
             details: None,
             hint: None,
+            silent: false,
         }
     }
 
@@ -99,12 +126,29 @@ impl CliError {
         self
     }
 
+    /// Report only through the exit code when a person is reading.
+    pub fn silenced(mut self) -> Self {
+        self.silent = true;
+        self
+    }
+
     pub fn config(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::ConfigError, message)
     }
 
     pub fn invalid_argument(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::InvalidArgument, message)
+    }
+
+    /// A gh flag or command that parses but that GitFox cannot honour.
+    ///
+    /// Better than clap's "unexpected argument": the caller learns the flag is
+    /// known and why it does nothing here, instead of hunting for a typo.
+    pub fn unsupported(what: impl std::fmt::Display, why: impl std::fmt::Display) -> Self {
+        Self::new(
+            ErrorCode::Unsupported,
+            format!("{what} is not supported: {why}"),
+        )
     }
 
     pub fn exit_code(&self) -> i32 {
@@ -167,6 +211,12 @@ impl From<gitfox_client::Error> for CliError {
     }
 }
 
+/// The error for an `io::Error` while writing output — which, after the
+/// broken-pipe case is forgiven, means something is really wrong.
+pub fn unexpected(err: std::io::Error) -> CliError {
+    CliError::new(ErrorCode::Unexpected, err.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,7 +225,10 @@ mod tests {
     fn exit_codes_match_the_documented_table() {
         let expected = [
             (ErrorCode::Unexpected, 1),
+            (ErrorCode::ChecksFailed, 1),
+            (ErrorCode::RunFailed, 1),
             (ErrorCode::InvalidArgument, 2),
+            (ErrorCode::Cancelled, 2),
             (ErrorCode::AuthRequired, 3),
             (ErrorCode::AuthFailed, 3),
             (ErrorCode::NotFound, 4),
@@ -188,7 +241,9 @@ mod tests {
             (ErrorCode::RateLimited, 6),
             (ErrorCode::ConfigError, 7),
             (ErrorCode::GitContextError, 8),
+            (ErrorCode::ChecksPending, 8),
             (ErrorCode::NotImplemented, 9),
+            (ErrorCode::Unsupported, 9),
         ];
         for (code, exit) in expected {
             assert_eq!(code.exit_code(), exit, "{}", code.as_str());
@@ -236,5 +291,20 @@ mod tests {
         assert_eq!(value["code"], "CONFIG_ERROR");
         assert_eq!(value["message"], "nope");
         assert!(value.get("details").is_some());
+    }
+
+    #[test]
+    fn an_unsupported_flag_names_itself_and_the_reason() {
+        let err = CliError::unsupported("`--auto`", "GitFox has no auto-merge");
+        assert_eq!(err.code, ErrorCode::Unsupported);
+        assert_eq!(err.exit_code(), 9);
+        assert_eq!(
+            err.message,
+            "`--auto` is not supported: GitFox has no auto-merge"
+        );
+        // Silence is opt-in; it never changes the code or the JSON.
+        let silent = CliError::new(ErrorCode::ChecksFailed, "1 failing check").silenced();
+        assert!(silent.silent);
+        assert_eq!(silent.to_json()["code"], "CHECKS_FAILED");
     }
 }
