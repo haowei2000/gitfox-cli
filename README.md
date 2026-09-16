@@ -37,7 +37,7 @@ v1.3.0. Lists page transparently and say when they were truncated, transient
 failures are retried, and the JSON contract is written down in
 [docs/json-schema.md](docs/json-schema.md).
 
-Next: `fx-mcp` (v0.7), reusing `gitfox-client` directly.
+Next: `fx-mcp` (v0.8), reusing `gitfox-client` directly.
 
 ## Install
 
@@ -477,7 +477,7 @@ The JSON each command returns: [docs/json-schema.md](docs/json-schema.md).
                               ▲
                   ┌───────────┴───────────┐
                   │                       │
-               fx CLI                  fx MCP  (v0.7)
+               fx CLI                  fx MCP  (v0.8)
                   ▲                       ▲
           ┌───────┼───────┐               │
           │       │       │               │
@@ -510,7 +510,7 @@ crates/
 Two rules keep this from rotting:
 
 * **The client knows nothing about the CLI.** That is what lets `fx-mcp` reuse
-  it in v0.7 rather than shelling out to this binary.
+  it in v0.8 rather than shelling out to this binary.
 * **The CLI's JSON schema is its own.** Commands map API responses onto models
   the CLI owns, so a GitFox API change does not have to break an agent.
 
@@ -524,8 +524,8 @@ Two rules keep this from rotting:
 | **v0.4** ✅ | `pipeline list/view/logs/run/retry`, including `logs --failed` |
 | **v0.5** ✅ | `pr checkout/diff/checks`, `pr create --fill`, shell completion |
 | **v0.6** ✅ | agent hardening: pagination, retries, non-interactive edges, schema freeze |
-| **unreleased** ✅ | gh compatibility: gh's commands, flags, `--json`/`--jq`/`--template` and exit codes |
-| [v0.7](https://github.com/haowei2000/gitfox-cli/milestone/1) | `fx-mcp`, reusing `gitfox-client` directly |
+| **v0.7** ✅ | gh compatibility: gh's commands, flags, `--json`/`--jq`/`--template` and exit codes |
+| [v0.8](https://github.com/haowei2000/gitfox-cli/milestone/1) | `fx-mcp`, reusing `gitfox-client` directly |
 | [v1.0](https://github.com/haowei2000/gitfox-cli/milestone/2) | CLI syntax, JSON schema, config format and exit codes all stable |
 
 The twelve commands v0.1–v0.4 aim to make rock solid: `auth login/logout/status`,

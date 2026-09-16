@@ -11,6 +11,8 @@ change; from 1.0 they are covered by the version promise. See
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-09-14
+
 gh compatibility. Every one of gh 2.100's 197 commands now either works against
 GitFox with gh's spelling, flags and exit codes, or answers `UNSUPPORTED`
 (exit 9) naming the feature GitFox lacks, instead of clap's "unrecognized
