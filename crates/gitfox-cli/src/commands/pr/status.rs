@@ -1,4 +1,4 @@
-//! `fx pr status` — the pull requests that concern you in this repository.
+//! `gf pr status` — the pull requests that concern you in this repository.
 //!
 //! Three sections, as in gh: the current branch's pull request, the ones you
 //! opened, and the ones waiting on your review. GitFox's space-wide listing is

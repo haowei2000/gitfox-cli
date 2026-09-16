@@ -12,7 +12,7 @@ use crate::error::Result;
 use crate::export::{ExportSpec, time_value};
 
 /// Every field `--json` accepts on a pull request: gh's names first, then the
-/// snake_case keys of fx's own envelope that gh has no name for.
+/// snake_case keys of gf's own envelope that gh has no name for.
 pub const PR_FIELDS: &[&str] = &[
     "additions",
     "assignees",
@@ -60,7 +60,7 @@ pub const PR_FIELDS: &[&str] = &[
     "title",
     "updatedAt",
     "url",
-    // fx's own names
+    // gf's own names
     "description",
     "is_draft",
     "source_branch",
@@ -447,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn fx_names_keep_the_envelopes_shapes() {
+    fn gf_names_keep_the_envelopes_shapes() {
         assert_eq!(field("source_branch"), "feat/icons");
         assert_eq!(field("created"), 1_789_346_930_642i64);
         assert_eq!(field("description"), "## Summary");

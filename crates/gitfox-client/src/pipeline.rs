@@ -24,7 +24,7 @@
 //!   request rather than one per pipeline.
 //! * Logs are addressed per *step*, by stage number and step number, and only
 //!   the single-execution endpoint returns the stage tree. So
-//!   `fx pipeline logs --failed` reads the execution first, walks it for steps
+//!   `gf pipeline logs --failed` reads the execution first, walks it for steps
 //!   that failed, and fetches only those.
 //! * A step's log is not persisted until it finishes: the static endpoint
 //!   answers 404 for a running step, and its output is only reachable over the

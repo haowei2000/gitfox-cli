@@ -1,4 +1,4 @@
-//! `fx workflow` — pipelines, the way `gh workflow` presents workflows.
+//! `gf workflow` — pipelines, the way `gh workflow` presents workflows.
 //!
 //! A pipeline can be named by its identifier, its numeric id, or the path of
 //! its YAML file — the three ways gh names a workflow.
@@ -200,7 +200,7 @@ async fn trigger(args: WorkflowRunArgs, ctx: &Context) -> Result<()> {
             pipeline.identifier
         ))
         .with_hint(format!(
-            "enable it with `fx workflow enable {}`",
+            "enable it with `gf workflow enable {}`",
             pipeline.identifier
         )));
     }
@@ -246,7 +246,7 @@ const WORKFLOW_FIELDS: &[&str] = &[
     "name",
     "path",
     "state",
-    // fx's own names
+    // gf's own names
     "identifier",
     "description",
     "disabled",

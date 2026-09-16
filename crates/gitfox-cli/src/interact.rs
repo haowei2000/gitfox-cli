@@ -33,7 +33,7 @@ pub fn open_in_browser(ctx: &Context, url: &str) -> Result<()> {
     })
 }
 
-/// Report a URL without opening it — `fx browse --no-browser`.
+/// Report a URL without opening it — `gf browse --no-browser`.
 pub fn print_url(ctx: &Context, url: &str) -> Result<()> {
     ctx.renderer.emit(&WebPage {
         url: url.to_string(),
@@ -128,7 +128,7 @@ pub fn edit_text(ctx: &Context, initial: &str, name: &str) -> Result<String> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
-    let path = std::env::temp_dir().join(format!("fx-{}-{nanos}-{name}", std::process::id()));
+    let path = std::env::temp_dir().join(format!("gf-{}-{nanos}-{name}", std::process::id()));
     std::fs::write(&path, initial)
         .map_err(|e| CliError::new(ErrorCode::Unexpected, format!("{}: {e}", path.display())))?;
 

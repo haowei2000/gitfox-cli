@@ -20,7 +20,7 @@ pub fn run(cmd: GhOnlyCommand) -> Result<()> {
         GhOnlyCommand::Discussion(_) => ("discussion", "GitFox has no discussions"),
         GhOnlyCommand::Extension(_) => (
             "extension",
-            "fx has no extensions; `fx alias set --shell` covers custom commands",
+            "gf has no extensions; `gf alias set --shell` covers custom commands",
         ),
         GhOnlyCommand::Gist(_) => ("gist", "GitFox has no gists"),
         GhOnlyCommand::GpgKey(_) => (
@@ -33,9 +33,9 @@ pub fn run(cmd: GhOnlyCommand) -> Result<()> {
         ),
         GhOnlyCommand::Licenses(_) => (
             "licenses",
-            "fx does not bundle third-party license texts; fx itself is MIT-licensed",
+            "gf does not bundle third-party license texts; gf itself is MIT-licensed",
         ),
-        GhOnlyCommand::Preview(_) => ("preview", "fx has no preview features to try"),
+        GhOnlyCommand::Preview(_) => ("preview", "gf has no preview features to try"),
         GhOnlyCommand::Project(_) => ("project", "GitFox has no projects"),
         GhOnlyCommand::Release(_) => (
             "release",
@@ -43,20 +43,20 @@ pub fn run(cmd: GhOnlyCommand) -> Result<()> {
         ),
         GhOnlyCommand::Search(_) => (
             "search",
-            "GitFox has no cross-repository search; `fx pr list -S` and `fx repo list -S` search within one repository or space",
+            "GitFox has no cross-repository search; `gf pr list -S` and `gf repo list -S` search within one repository or space",
         ),
         GhOnlyCommand::Skill(_) => ("skill", "that is a GitHub feature"),
         GhOnlyCommand::Variable(_) => (
             "variable",
-            "GitFox has no pipeline variables; store values with `fx secret set`",
+            "GitFox has no pipeline variables; store values with `gf secret set`",
         ),
     };
     refuse(command, why)
 }
 
-/// `fx <command>` is a gh command GitFox cannot back.
+/// `gf <command>` is a gh command GitFox cannot back.
 pub fn refuse(command: &str, why: &str) -> Result<()> {
-    Err(CliError::unsupported(format!("`fx {command}`"), why))
+    Err(CliError::unsupported(format!("`gf {command}`"), why))
 }
 
 #[cfg(test)]
@@ -74,7 +74,7 @@ mod tests {
         assert_eq!(err.code, ErrorCode::Unsupported);
         assert_eq!(err.exit_code(), 9);
         assert!(
-            err.message.starts_with("`fx issue` is not supported"),
+            err.message.starts_with("`gf issue` is not supported"),
             "{}",
             err.message
         );

@@ -1,4 +1,4 @@
-//! `fx repo`.
+//! `gf repo`.
 
 use std::path::PathBuf;
 
@@ -37,7 +37,7 @@ pub enum RepoSubcommand {
     /// Sync a repository: a fork or mirror on the server, or your checkout's
     /// branch from its remote
     Sync(RepoSyncArgs),
-    /// Set the repository fx uses in this checkout
+    /// Set the repository gf uses in this checkout
     #[command(name = "set-default")]
     SetDefault(RepoSetDefaultArgs),
     /// Print a file from a repository
@@ -208,11 +208,11 @@ pub struct RepoCreateArgs {
     #[arg(long)]
     pub add_readme: bool,
 
-    /// Start from a gitignore template; see `fx repo gitignore list`
+    /// Start from a gitignore template; see `gf repo gitignore list`
     #[arg(short, long, value_name = "TEMPLATE")]
     pub gitignore: Option<String>,
 
-    /// Add a license; see `fx repo license list`
+    /// Add a license; see `gf repo license list`
     #[arg(short, long, value_name = "LICENSE")]
     pub license: Option<String>,
 
@@ -476,7 +476,7 @@ pub struct RepoReadFileArgs {
     #[arg(long = "ref", value_name = "REF")]
     pub git_ref: Option<String>,
 
-    /// Write the file here instead of to stdout (gh's -o; `--output` is fx's
+    /// Write the file here instead of to stdout (gh's -o; `--output` is gf's
     /// global output format)
     #[arg(id = "output_path", short = 'o', value_name = "PATH")]
     pub output: Option<PathBuf>,

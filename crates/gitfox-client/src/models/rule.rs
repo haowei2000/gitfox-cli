@@ -6,7 +6,7 @@ use super::Principal;
 /// A protection rule on a repository.
 ///
 /// `pattern` and `definition` stay JSON: their shape depends on the rule type
-/// and grows with every GitFox release, and fx only ever displays them.
+/// and grows with every GitFox release, and gf only ever displays them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Rule {
     #[serde(default)]

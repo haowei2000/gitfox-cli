@@ -23,7 +23,7 @@ pub struct Context {
     /// What the surrounding checkout said. Empty outside a git repository, and
     /// empty when nothing needed it — see [`Context::build`].
     pub git: GitInfo,
-    /// `--host` exactly as given on the command line. `fx config` reads it as
+    /// `--host` exactly as given on the command line. `gf config` reads it as
     /// the host to scope a setting to, the way gh's `config --host` works.
     pub host_flag: Option<String>,
 }
@@ -72,7 +72,7 @@ impl Context {
     pub fn host(&self) -> Result<&str> {
         self.config.host.as_deref().ok_or_else(|| {
             CliError::config("no GitFox host configured").with_hint(
-                "pass --host, set GITFOX_HOST, or run `fx auth login --hostname git.example.com`",
+                "pass --host, set GITFOX_HOST, or run `gf auth login --hostname git.example.com`",
             )
         })
     }
@@ -83,7 +83,7 @@ impl Context {
         self.client_for(self.host()?, self.config.token.as_ref())
     }
 
-    /// A client for an explicit host and token — used by `fx auth login`, which
+    /// A client for an explicit host and token — used by `gf auth login`, which
     /// must validate credentials before storing them.
     pub fn client_for(&self, host: &str, token: Option<&Secret>) -> Result<GitFoxClient> {
         if self.config.insecure {
@@ -137,7 +137,7 @@ impl Context {
                 ErrorCode::GitContextError,
                 "no repository specified and none could be inferred from the current directory",
             )
-            .with_hint("pass -R space/name, set GITFOX_REPO, or run fx from inside a checkout")
+            .with_hint("pass -R space/name, set GITFOX_REPO, or run gf from inside a checkout")
         })?;
         parse_repo(raw)
     }
@@ -163,7 +163,7 @@ impl Context {
             ErrorCode::GitContextError,
             "no space specified and none could be inferred from the current directory",
         )
-        .with_hint("pass -o SPACE or --org SPACE, or run fx from inside a checkout"))
+        .with_hint("pass -o SPACE or --org SPACE, or run gf from inside a checkout"))
     }
 
     /// The checked-out branch, for commands that default to "the current one".
@@ -191,7 +191,7 @@ impl Context {
     pub fn require_interactive(&self, what: &str) -> Result<()> {
         if self.config.non_interactive {
             return Err(CliError::invalid_argument(format!(
-                "{what} needs interactive input, but fx is running non-interactively"
+                "{what} needs interactive input, but gf is running non-interactively"
             ))
             .with_hint("pass the value as a flag, or use --with-token / GITFOX_TOKEN"));
         }

@@ -1,5 +1,5 @@
 //! Everything that is not a repository, a pull request or CI: authentication,
-//! `fx api`, configuration and aliases, and the space- and account-level
+//! `gf api`, configuration and aliases, and the space- and account-level
 //! resources — secrets, labels, SSH keys, spaces, rules, gitspaces.
 
 use std::path::PathBuf;
@@ -32,16 +32,16 @@ pub enum AuthSubcommand {
     /// Show the active host and whether a token is configured
     #[command(disable_help_flag = true)]
     Status(AuthStatusArgs),
-    /// Print the token fx uses for a host
+    /// Print the token gf uses for a host
     #[command(disable_help_flag = true)]
     Token(AuthTokenArgs),
     /// Switch the default host
     #[command(disable_help_flag = true)]
     Switch(AuthSwitchArgs),
-    /// Make git use fx for GitFox credentials
+    /// Make git use gf for GitFox credentials
     #[command(name = "setup-git", disable_help_flag = true)]
     SetupGit(AuthSetupGitArgs),
-    /// The git credential helper `fx auth setup-git` installs
+    /// The git credential helper `gf auth setup-git` installs
     #[command(name = "git-credential", hide = true)]
     GitCredential(AuthGitCredentialArgs),
     #[command(hide = true, disable_help_flag = true)]
@@ -70,7 +70,7 @@ pub struct AuthLoginArgs {
     #[arg(short = 'p', long, value_name = "PROTOCOL")]
     pub git_protocol: Option<String>,
 
-    /// Accepted for gh compatibility; fx never generates SSH keys
+    /// Accepted for gh compatibility; gf never generates SSH keys
     #[arg(long, hide = true)]
     pub skip_ssh_key: bool,
 
@@ -112,7 +112,7 @@ pub struct AuthStatusArgs {
     #[arg(short = 'h', long, value_name = "HOST")]
     pub hostname: Option<String>,
 
-    /// Accepted for gh compatibility; fx keeps one account per host
+    /// Accepted for gh compatibility; gf keeps one account per host
     #[arg(short, long)]
     pub active: bool,
 
@@ -154,7 +154,7 @@ pub struct AuthSwitchArgs {
     #[arg(short = 'h', long, value_name = "HOST")]
     pub hostname: Option<String>,
 
-    /// Accepted for gh compatibility; fx keeps one account per host
+    /// Accepted for gh compatibility; gf keeps one account per host
     #[arg(short, long, value_name = "LOGIN")]
     pub user: Option<String>,
 }
@@ -165,11 +165,11 @@ pub struct AuthSetupGitArgs {
     #[arg(long, action = clap::ArgAction::Help)]
     pub help: Option<bool>,
 
-    /// Host to configure; defaults to every host fx knows
+    /// Host to configure; defaults to every host gf knows
     #[arg(short = 'h', long, value_name = "HOST")]
     pub hostname: Option<String>,
 
-    /// Configure --hostname even if fx has no token for it
+    /// Configure --hostname even if gf has no token for it
     #[arg(short, long, requires = "hostname")]
     pub force: bool,
 }
@@ -249,7 +249,7 @@ pub struct ApiArgs {
     #[arg(long, value_name = "HOST")]
     pub hostname: Option<String>,
 
-    /// Accepted for gh compatibility; fx does not cache responses
+    /// Accepted for gh compatibility; gf does not cache responses
     #[arg(long, value_name = "DURATION", hide = true)]
     pub cache: Option<String>,
 
@@ -284,7 +284,7 @@ pub enum ConfigSubcommand {
     /// Show the resolved configuration and where each value came from
     #[command(disable_help_flag = true, visible_alias = "ls")]
     List(ConfigListArgs),
-    /// Clear the cache — fx keeps none, so this only confirms that
+    /// Clear the cache — gf keeps none, so this only confirms that
     #[command(name = "clear-cache")]
     ClearCache,
 }
@@ -343,13 +343,13 @@ pub struct AliasCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum AliasSubcommand {
-    /// Create a shortcut for an fx command
+    /// Create a shortcut for an gf command
     #[command(long_about = "\
-Create a shortcut for an fx command.
+Create a shortcut for an gf command.
 
-  fx alias set co 'pr checkout'
-  fx alias set prs 'pr list --author $1'     # $1, $2… take the next arguments
-  fx alias set --shell mine 'fx pr list --json number,title | jq .'
+  gf alias set co 'pr checkout'
+  gf alias set prs 'pr list --author $1'     # $1, $2… take the next arguments
+  gf alias set --shell mine 'gf pr list --json number,title | jq .'
 
 An alias never shadows a built-in command.")]
     Set(AliasSetArgs),
@@ -423,9 +423,9 @@ Create or update a secret.
 GitFox keeps secrets in spaces. The space is -o/--org, else the current
 repository's space. The value is --body, else read from stdin, else prompted.
 
-  fx secret set DEPLOY_TOKEN --body \"$TOKEN\"
-  fx secret set DEPLOY_TOKEN < token.txt
-  fx secret set -f .env              # every KEY=VALUE in the file")]
+  gf secret set DEPLOY_TOKEN --body \"$TOKEN\"
+  gf secret set DEPLOY_TOKEN < token.txt
+  gf secret set -f .env              # every KEY=VALUE in the file")]
     Set(SecretSetArgs),
     /// Delete a secret
     #[command(visible_alias = "remove")]
@@ -479,7 +479,7 @@ pub struct SecretSetArgs {
     #[command(flatten)]
     pub scope: SecretScopeArgs,
 
-    // gh's -v; fx's -v is the global --verbose.
+    // gh's -v; gf's -v is the global --verbose.
     #[arg(long, value_name = "VISIBILITY", hide = true)]
     pub visibility: Option<String>,
 
@@ -663,7 +663,7 @@ pub struct SshKeyAddArgs {
 
 #[derive(Debug, Args)]
 pub struct SshKeyDeleteArgs {
-    /// The key's name, as `fx ssh-key list` shows it
+    /// The key's name, as `gf ssh-key list` shows it
     #[arg(value_name = "ID")]
     pub id: String,
 

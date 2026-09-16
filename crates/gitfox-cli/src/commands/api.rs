@@ -1,4 +1,4 @@
-//! `fx api` — the escape hatch.
+//! `gf api` — the escape hatch.
 //!
 //! Every GitFox endpoint is reachable from day one, which is what makes it safe
 //! to add typed commands slowly instead of racing the server's API surface.
@@ -30,7 +30,7 @@ pub async fn run(args: ApiArgs, ctx: &Context) -> Result<()> {
     let payload = read_payload(&args)?;
     let headers = parse_headers(&args.headers)?;
 
-    // `fx api /path` is a GET; sending anything without naming a method means
+    // `gf api /path` is a GET; sending anything without naming a method means
     // POST.
     let has_payload = args.body.is_some() || args.input.is_some();
     let method = match explicit_method {
@@ -132,7 +132,7 @@ async fn paginate(
     headers: &[(String, String)],
     slurp: bool,
 ) -> Result<(RawResponse, Value)> {
-    let mut url = url::Url::parse("http://fx.invalid/")
+    let mut url = url::Url::parse("http://gf.invalid/")
         .and_then(|base| base.join(path.trim_start_matches('/')))
         .map_err(|e| CliError::invalid_argument(format!("`{path}` is not a valid path: {e}")))?;
     let mut page: u64 = 1;
@@ -201,7 +201,7 @@ fn split_target(args: &ApiArgs) -> Result<(Option<Method>, String)> {
                 return Err(CliError::invalid_argument(format!(
                     "`{candidate}` is an HTTP method, not a path"
                 ))
-                .with_hint("usage: fx api [-X METHOD] PATH, e.g. `fx api -X POST /api/v1/foo`"));
+                .with_hint("usage: gf api [-X METHOD] PATH, e.g. `gf api -X POST /api/v1/foo`"));
             }
             Ok((None, candidate.to_string()))
         }

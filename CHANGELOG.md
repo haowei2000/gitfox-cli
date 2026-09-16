@@ -11,7 +11,26 @@ change; from 1.0 they are covered by the version promise. See
 
 ## [Unreleased]
 
-## [0.7.0] — 2026-09-14
+## [0.7.0] — 2026-09-16
+
+**The binary is now `gf`.** It was `fx`; nothing else about it changed — same
+crate (`gitfox-cli`), same commands, same flags, same JSON and exit codes.
+`cargo install gitfox-cli` leaves the old `fx` behind for you to delete.
+
+Existing setups carry over without being asked to log in again:
+
+* A token in the OS keychain is still found under the `fx-gitfox` service; new
+  ones are written under `gf-gitfox`, and `gf auth logout` clears both.
+* `~/.config/fx/config.toml` is read *and written* where it lies while
+  `~/.config/gf/config.toml` does not exist, so nothing has to be copied and
+  two files can never drift apart. Move it yourself whenever you like.
+* A checkout's `fx.repo` from `fx repo set-default` still resolves; the key is
+  rewritten as `gf.repo` the next time that command runs.
+
+`fx auth setup-git` is the one thing to redo: it wrote git a credential helper
+naming the old binary's path. Run `gf auth setup-git` again. Shell completions
+were installed under the old name too (`_fx`, `fx.fish`) — regenerate them with
+`gf completion`.
 
 gh compatibility. Every one of gh 2.100's 197 commands now either works against
 GitFox with gh's spelling, flags and exit codes, or answers `UNSUPPORTED`
@@ -20,44 +39,44 @@ subcommand".
 
 ### Changed — breaking
 
-Each of these was a place where a gh habit did something different in fx, most
+Each of these was a place where a gh habit did something different in gf, most
 of them silently.
 
-* **`fx api -F` / `-f` are gh's.** `-F` is `--field` (typed) and `-f` is
+* **`gf api -F` / `-f` are gh's.** `-F` is `--field` (typed) and `-f` is
   `--raw-field` (always a string); 0.6 had the letters the other way round, so
   `-f count=3` sent a number where gh sends a string. The long names keep their
   meaning. `--field` also follows gh more closely: it converts integers but not
   decimals (`1.10` stays the string `"1.10"`), a value is sent as written rather
   than trimmed, and naming a key twice is an error instead of the last one
   winning.
-* **`fx api` sends parameters as the query string on a GET.** 0.6 sent them as
-  a JSON body, which GitFox ignores, so `fx api -X GET …/pullreq -f state=merged`
+* **`gf api` sends parameters as the query string on a GET.** 0.6 sent them as
+  a JSON body, which GitFox ignores, so `gf api -X GET …/pullreq -f state=merged`
   answered with every pull request. On a GET or HEAD, and beside `--input` or
   `--body` (which may now be combined with fields), parameters are the query
   string; an array repeats its key.
-* **`fx pr merge -m` is `--merge`**, gh's flag for the merge strategy, not
+* **`gf pr merge -m` is `--merge`**, gh's flag for the merge strategy, not
   `--method METHOD`. `-m squash` is now an error: write `--squash` (`-s`),
   `--rebase` (`-r`) or `--method squash`. `--delete-branch` is `-d` as in gh;
   `-D` still works.
-* **`fx repo list -q TEXT` is `-S TEXT`.** `-q` is `--jq`, as everywhere in gh.
-* **`-h` is the host on `fx auth` and `fx config` subcommands**, as in gh:
+* **`gf repo list -q TEXT` is `-S TEXT`.** `-q` is `--jq`, as everywhere in gh.
+* **`-h` is the host on `gf auth` and `gf config` subcommands**, as in gh:
   `--hostname` on `auth login | logout | status | token | switch | setup-git`,
-  the host scope on `config get | set | list`. A gh user's `fx auth status -h
+  the host scope on `config get | set | list`. A gh user's `gf auth status -h
   host` printed help and exited 0. `--help` still works.
-* **`fx pr checks` exits 1 when a check failed and 8 while checks are pending**,
-  as gh does, so `fx pr checks && deploy` gates on CI. 0.6 exited 0 with failing
+* **`gf pr checks` exits 1 when a check failed and 8 while checks are pending**,
+  as gh does, so `gf pr checks && deploy` gates on CI. 0.6 exited 0 with failing
   checks. Only for human output: with `--json`, `--output json` or `--agent` the
   checks are the result, exit 0, and `failed` says what happened.
 * **`--json` followed by a field list selects fields**, gh's `--json FIELDS`, on
   the commands that export fields (listed in
-  [docs/json-schema.md](docs/json-schema.md)). On those, `fx repo list --json
-  ai` now asks for a field called `ai`; write `fx --json repo list ai`. Bare
+  [docs/json-schema.md](docs/json-schema.md)). On those, `gf repo list --json
+  ai` now asks for a field called `ai`; write `gf --json repo list ai`. Bare
   `--json`, and `--json` on any other command, keep their 0.6 meaning.
 
 ### Added
 
-* **Pull requests:** `fx pr close | reopen | ready | edit | comment | review |
-  status | update-branch`, and `fx co` for `fx pr checkout`. Every `fx pr`
+* **Pull requests:** `gf pr close | reopen | ready | edit | comment | review |
+  status | update-branch`, and `gf co` for `gf pr checkout`. Every `gf pr`
   command takes gh's selectors: a number, `#12`, a pull request URL, or a
   branch name.
   * `list`: `--base`, `--head`, `--label`, `--search`, `--draft`, `--web`, and
@@ -71,42 +90,42 @@ of them silently.
     `--web`.
   * `checkout`: `--branch`, `--detach`, `--force`, `--worktree`,
     `--recurse-submodules` — and pull requests from forks, which 0.6 refused.
-  * `status` and `fx status` fall back to asking each open pull request for its
+  * `status` and `gf status` fall back to asking each open pull request for its
     reviewers, because GitFox 1.3.0 answers HTTP 500 to the reviewer filter.
-* **Repositories:** `fx repo create | delete | edit | rename | fork | sync |
+* **Repositories:** `gf repo create | delete | edit | rename | fork | sync |
   set-default | read-file | read-dir | gitignore list | license list`.
   `repo list` gains `--visibility`, `--fork` and `--source`; `repo view` shows
   the README and takes `--branch` and `--web`; `repo clone` sets up an
   `upstream` remote for a fork and passes git flags after `--`. `repo delete`
   needs `--yes` when nobody can confirm, and reports `deleted_at` because GitFox
   deletes softly.
-* **CI in gh's words:** `fx run list | view | rerun | watch | cancel | delete`
-  and `fx workflow list | view | run | enable | disable`, over the same
-  pipelines and executions as `fx pipeline`. `run list` filters by `--branch`,
+* **CI in gh's words:** `gf run list | view | rerun | watch | cancel | delete`
+  and `gf workflow list | view | run | enable | disable`, over the same
+  pipelines and executions as `gf pipeline`. `run list` filters by `--branch`,
   `--status` (gh's vocabulary or GitFox's), `--user`, `--commit`, `--event` and
-  `--created`; `run view --log-failed` is `fx pipeline logs --failed`;
-  `workflow view --yaml` prints the pipeline definition. `fx pipeline list
-  --workflow`, `fx pipeline run --ref` and `fx pipeline view --exit-status`
+  `--created`; `run view --log-failed` is `gf pipeline logs --failed`;
+  `workflow view --yaml` prints the pipeline definition. `gf pipeline list
+  --workflow`, `gf pipeline run --ref` and `gf pipeline view --exit-status`
   accept gh's names too.
-* **Space resources:** `fx secret list | set | delete` (from stdin, a hidden
-  prompt, `--body` or a dotenv `--env-file`), `fx label list | create | edit |
-  delete | clone`, `fx ssh-key list | add | delete`, `fx org list` (the spaces
-  you belong to), `fx ruleset list | view`, and `fx codespace list | view |
+* **Space resources:** `gf secret list | set | delete` (from stdin, a hidden
+  prompt, `--body` or a dotenv `--env-file`), `gf label list | create | edit |
+  delete | clone`, `gf ssh-key list | add | delete`, `gf org list` (the spaces
+  you belong to), `gf ruleset list | view`, and `gf codespace list | view |
   create | stop | delete | logs` over GitFox gitspaces.
-* **Everyday gh commands:** `fx browse` (repository, file, commit, pull request
-  and pipeline pages; `-n` prints the URL), `fx status`, `fx alias set | list |
-  delete | import` (with `--shell` aliases), `fx auth token | switch |
-  setup-git`, `fx config clear-cache`, and `fx completion -s SHELL`.
+* **Everyday gh commands:** `gf browse` (repository, file, commit, pull request
+  and pipeline pages; `-n` prints the URL), `gf status`, `gf alias set | list |
+  delete | import` (with `--shell` aliases), `gf auth token | switch |
+  setup-git`, `gf config clear-cache`, and `gf completion -s SHELL`.
 * **gh-style output:** `--json FIELDS`, `--jq` and `--template` on every
   command gh has them for, with gh's field names and value shapes (`OPEN`, ISO
   8601 times, `{"login": …}`). jq runs built in; templates get gh's helpers
   (`tablerow`, `timeago`, `color`, …).
-* **`fx api`:** `-X/--method`, `--paginate` (over GitFox's `page`/`limit`) with
+* **`gf api`:** `-X/--method`, `--paginate` (over GitFox's `page`/`limit`) with
   `--slurp`, `--jq`, `--template`, `--silent`, `--hostname`; `key[]=v`,
   `key[sub]=v` and `key[][sub]=v` parameters; `{owner}`, `{repo}`, `{repo_ref}`
   and `{branch}` placeholders in the path and in `-F` values.
 * **Config:** `git_protocol` (per host too), `editor`, `browser`, `prompt`
-  (`disabled` never prompts) and `pager`. fx does not page its output, and says
+  (`disabled` never prompts) and `pager`. gf does not page its output, and says
   so when `pager` is set.
 * **gh commands for features GitFox does not have** — issues, releases, gists,
   discussions, projects, search, variables, caches, attestations, GPG keys,
@@ -130,15 +149,15 @@ of them silently.
 
 ### Security
 
-* `fx auth token` prints the token, and `fx auth status --show-token` includes
+* `gf auth token` prints the token, and `gf auth status --show-token` includes
   it — both only when asked, as in gh, because printing it is what they are
   for. No other command outputs a token, in any mode; the end-to-end test that
   checks every stream still covers the rest.
-* `fx auth setup-git` makes git ask `fx auth git-credential` for the configured
+* `gf auth setup-git` makes git ask `gf auth git-credential` for the configured
   hosts' credentials, so a clone authenticates without the token ever being
   written into a remote URL or `.git/config`. It edits your global git config,
   and only when you run it.
-* `fx secret set` never echoes a value. `--body` puts the value in your shell
+* `gf secret set` never echoes a value. `--body` puts the value in your shell
   history and the process list, as it does in gh; prefer stdin or the prompt.
 
 ## [0.6.2] — 2026-09-11

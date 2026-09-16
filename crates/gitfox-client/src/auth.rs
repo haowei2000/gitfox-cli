@@ -14,7 +14,7 @@ impl<'a> AuthApi<'a> {
     }
 
     /// `GET /api/v1/user` — also doubles as the token validity check used by
-    /// `fx auth login` and `fx auth status`.
+    /// `gf auth login` and `gf auth status`.
     pub async fn current_user(&self) -> Result<User> {
         self.client.get_json("/api/v1/user").await
     }

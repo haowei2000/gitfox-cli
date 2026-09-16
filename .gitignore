@@ -2,7 +2,7 @@
 **/*.rs.bk
 *.pdb
 
-# fx writes here; never let a real one near the repo
+# gf writes here; never let a real one near the repo
 config.toml.local
 .env
 

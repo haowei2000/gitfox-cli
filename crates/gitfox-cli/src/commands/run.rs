@@ -1,4 +1,4 @@
-//! `fx run` — pipeline runs, the way `gh run` presents them.
+//! `gf run` — pipeline runs, the way `gh run` presents them.
 //!
 //! GitFox numbers runs per pipeline, where GitHub numbers them per repository.
 //! So a run is `NUMBER` when that is unambiguous — one pipeline, or only one
@@ -206,7 +206,7 @@ async fn list(args: RunListArgs, ctx: &Context) -> Result<()> {
     })
 }
 
-/// The client-side filters `fx run list` applies — GitFox's executions
+/// The client-side filters `gf run list` applies — GitFox's executions
 /// listing takes none of them.
 #[derive(Debug, Default)]
 struct RunFilter {
@@ -592,7 +592,7 @@ async fn delete(args: RunRefArgs, ctx: &Context) -> Result<()> {
 // rendering
 // ---------------------------------------------------------------------------
 
-/// Every field `--json` accepts on a run: gh's names, then fx's own.
+/// Every field `--json` accepts on a run: gh's names, then gf's own.
 const RUN_FIELDS: &[&str] = &[
     "attempt",
     "conclusion",
@@ -611,7 +611,7 @@ const RUN_FIELDS: &[&str] = &[
     "url",
     "workflowDatabaseId",
     "workflowName",
-    // fx's own names
+    // gf's own names
     "pipeline",
     "branch",
     "message",
@@ -904,7 +904,7 @@ mod tests {
         assert_eq!(field("workflowDatabaseId"), 24);
         assert_eq!(field("workflowName"), "AgentNexus");
         assert_eq!(field("jobs")[0]["conclusion"], "success");
-        // fx's own names read from the envelope's shape.
+        // gf's own names read from the envelope's shape.
         assert_eq!(field("branch"), "develop");
         assert_eq!(field("message"), "feat(bots): tools");
     }

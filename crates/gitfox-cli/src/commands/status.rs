@@ -1,4 +1,4 @@
-//! `fx status` — what needs you across a space.
+//! `gf status` — what needs you across a space.
 //!
 //! gh's status reports issues, pull requests, review requests and mentions
 //! across every repository. GitFox has no issues or notifications, so this is

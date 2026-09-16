@@ -56,7 +56,7 @@ fn no_subcommand_flag_shadows_a_global_one() {
     for sub in root.get_subcommands() {
         walk(
             sub,
-            &format!("fx {}", sub.get_name()),
+            &format!("gf {}", sub.get_name()),
             &globals,
             &mut clashes,
         );
@@ -66,34 +66,34 @@ fn no_subcommand_flag_shadows_a_global_one() {
 
 #[test]
 fn json_flag_is_shorthand_for_output_json() {
-    let cli = parse(&["fx", "--json", "api", "/api/v1/user"]);
+    let cli = parse(&["gf", "--json", "api", "/api/v1/user"]);
     assert_eq!(cli.global.overrides().output, Some(OutputFormat::Json));
 }
 
 #[test]
 fn json_with_fields_is_an_export_that_leaves_the_format_alone() {
-    let cli = parse(&["fx", "pr", "list", "--json=number,title"]);
+    let cli = parse(&["gf", "pr", "list", "--json=number,title"]);
     assert_eq!(cli.global.json.as_deref(), Some("number,title"));
     assert_eq!(cli.global.overrides().output, None);
 }
 
 #[test]
 fn output_flag_and_json_flag_are_mutually_exclusive() {
-    rejects(&["fx", "--json", "--output", "table", "api", "/x"]);
+    rejects(&["gf", "--json", "--output", "table", "api", "/x"]);
 }
 
 #[test]
 fn global_flags_are_accepted_before_and_after_the_subcommand() {
     for argv in [
         vec![
-            "fx",
+            "gf",
             "--host",
             "https://git.example.com",
             "api",
             "/api/v1/user",
         ],
         vec![
-            "fx",
+            "gf",
             "api",
             "/api/v1/user",
             "--host",
@@ -107,14 +107,14 @@ fn global_flags_are_accepted_before_and_after_the_subcommand() {
 
 #[test]
 fn api_accepts_a_bare_path_or_a_method_and_a_path() {
-    let bare = parse(&["fx", "api", "/api/v1/user"]);
+    let bare = parse(&["gf", "api", "/api/v1/user"]);
     let Command::Api(args) = bare.command else {
         panic!("expected the api subcommand")
     };
     assert_eq!(args.method_or_path, "/api/v1/user");
     assert!(args.path.is_none());
 
-    let explicit = parse(&["fx", "api", "POST", "/api/v1/foo"]);
+    let explicit = parse(&["gf", "api", "POST", "/api/v1/foo"]);
     let Command::Api(args) = explicit.command else {
         panic!("expected the api subcommand")
     };
@@ -126,7 +126,7 @@ fn api_accepts_a_bare_path_or_a_method_and_a_path() {
 fn api_short_flags_mean_what_they_mean_in_gh() {
     // gh: -F/--field is typed, -f/--raw-field is a string, -X is the method.
     let cli = parse(&[
-        "fx",
+        "gf",
         "api",
         "-X",
         "POST",
@@ -152,15 +152,15 @@ fn api_short_flags_mean_what_they_mean_in_gh() {
 
 #[test]
 fn api_body_sources_are_mutually_exclusive() {
-    rejects(&["fx", "api", "POST", "/x", "--body", "{}", "--input", "-"]);
+    rejects(&["gf", "api", "POST", "/x", "--body", "{}", "--input", "-"]);
     // Fields beside a body are the query string, as with gh's --input.
-    parse(&["fx", "api", "POST", "/x", "--body", "{}", "--field", "a=b"]);
-    parse(&["fx", "api", "POST", "/x", "--input", "-", "-f", "a=b"]);
+    parse(&["gf", "api", "POST", "/x", "--body", "{}", "--field", "a=b"]);
+    parse(&["gf", "api", "POST", "/x", "--input", "-", "-f", "a=b"]);
 }
 
 #[test]
 fn fast_forward_keeps_its_hyphen_on_the_command_line() {
-    let cli = parse(&["fx", "pr", "merge", "12", "--method", "fast-forward"]);
+    let cli = parse(&["gf", "pr", "merge", "12", "--method", "fast-forward"]);
     let Command::Pr(cmd) = cli.command else {
         panic!("expected pr")
     };
@@ -184,7 +184,7 @@ fn pr_merge_takes_ghs_strategy_flags() {
         ("--merge", MergeMethod::Merge),
         ("-m", MergeMethod::Merge),
     ] {
-        let cli = parse(&["fx", "pr", "merge", "12", flag, "-d"]);
+        let cli = parse(&["gf", "pr", "merge", "12", flag, "-d"]);
         let Command::Pr(cmd) = cli.command else {
             panic!("expected pr")
         };
@@ -195,9 +195,9 @@ fn pr_merge_takes_ghs_strategy_flags() {
         assert!(args.delete_branch, "-d is --delete-branch, as in gh");
     }
     // Two strategies at once is a contradiction, as in gh.
-    rejects(&["fx", "pr", "merge", "12", "--squash", "--rebase"]);
-    // -D still works for anyone used to fx 0.6.
-    let cli = parse(&["fx", "pr", "merge", "12", "-D"]);
+    rejects(&["gf", "pr", "merge", "12", "--squash", "--rebase"]);
+    // -D still works for anyone used to gf 0.6.
+    let cli = parse(&["gf", "pr", "merge", "12", "-D"]);
     let Command::Pr(cmd) = cli.command else {
         panic!("expected pr")
     };
@@ -219,7 +219,7 @@ fn state_all_expands_to_every_state() {
 #[test]
 fn pr_create_follows_the_gh_short_flag_convention() {
     let cli = parse(&[
-        "fx",
+        "gf",
         "pr",
         "create",
         "-B",
@@ -250,7 +250,7 @@ fn pr_create_follows_the_gh_short_flag_convention() {
     assert_eq!(args.labels, vec!["bug"]);
     assert!(args.draft);
     // -f is --fill, as in gh.
-    let cli = parse(&["fx", "pr", "create", "-f"]);
+    let cli = parse(&["gf", "pr", "create", "-f"]);
     let Command::Pr(cmd) = cli.command else {
         panic!("expected pr")
     };
@@ -263,7 +263,7 @@ fn pr_create_follows_the_gh_short_flag_convention() {
 #[test]
 fn pr_list_takes_ghs_filters() {
     let cli = parse(&[
-        "fx", "pr", "list", "-A", "whw", "-B", "main", "-H", "feat", "-l", "bug", "-S", "oauth",
+        "gf", "pr", "list", "-A", "whw", "-B", "main", "-H", "feat", "-l", "bug", "-S", "oauth",
         "-d", "-s", "all", "-L", "5",
     ]);
     let Command::Pr(cmd) = cli.command else {
@@ -290,7 +290,7 @@ fn a_pull_request_can_be_named_by_number_url_or_branch() {
         "https://git.example.com/ai/backend/pulls/12",
         "feat/oauth",
     ] {
-        let cli = parse(&["fx", "pr", "view", selector]);
+        let cli = parse(&["gf", "pr", "view", selector]);
         let Command::Pr(cmd) = cli.command else {
             panic!("expected pr")
         };
@@ -303,9 +303,9 @@ fn a_pull_request_can_be_named_by_number_url_or_branch() {
 
 #[test]
 fn pr_has_a_pull_request_alias_and_co_is_pr_checkout() {
-    parse(&["fx", "pull-request", "list"]);
-    parse(&["fx", "pr", "ls"]);
-    let cli = parse(&["fx", "co", "12", "--detach"]);
+    parse(&["gf", "pull-request", "list"]);
+    parse(&["gf", "pr", "ls"]);
+    let cli = parse(&["gf", "co", "12", "--detach"]);
     let Command::Co(args) = cli.command else {
         panic!("expected co")
     };
@@ -315,14 +315,14 @@ fn pr_has_a_pull_request_alias_and_co_is_pr_checkout() {
 
 #[test]
 fn agent_flag_is_global() {
-    let cli = parse(&["fx", "--agent", "pr", "list"]);
+    let cli = parse(&["gf", "--agent", "pr", "list"]);
     assert!(cli.global.agent);
 }
 
 #[test]
 fn dash_h_is_the_hostname_on_auth_commands_and_help_is_long_only() {
     for sub in ["login", "logout", "status", "token", "switch", "setup-git"] {
-        let cli = parse(&["fx", "auth", sub, "-h", "git.example.com"]);
+        let cli = parse(&["gf", "auth", sub, "-h", "git.example.com"]);
         let Command::Auth(cmd) = cli.command else {
             panic!("expected auth")
         };
@@ -337,14 +337,14 @@ fn dash_h_is_the_hostname_on_auth_commands_and_help_is_long_only() {
         };
         assert_eq!(hostname.as_deref(), Some("git.example.com"), "{sub}");
     }
-    let help = rejects(&["fx", "auth", "login", "--help"]);
+    let help = rejects(&["gf", "auth", "login", "--help"]);
     assert_eq!(help.kind(), clap::error::ErrorKind::DisplayHelp);
 }
 
 #[test]
 fn dash_h_is_the_host_scope_on_config_commands() {
     let cli = parse(&[
-        "fx",
+        "gf",
         "config",
         "get",
         "-h",
@@ -359,24 +359,24 @@ fn dash_h_is_the_host_scope_on_config_commands() {
     };
     assert_eq!(args.scope.as_deref(), Some("git.example.com"));
     assert_eq!(args.key, "git_protocol");
-    parse(&["fx", "config", "clear-cache"]);
+    parse(&["gf", "config", "clear-cache"]);
 }
 
 #[test]
 fn completion_takes_the_shell_positionally_or_with_dash_s() {
-    parse(&["fx", "completion", "zsh"]);
-    let cli = parse(&["fx", "completion", "-s", "bash"]);
+    parse(&["gf", "completion", "zsh"]);
+    let cli = parse(&["gf", "completion", "-s", "bash"]);
     let Command::Completion(args) = cli.command else {
         panic!("expected completion")
     };
     assert_eq!(args.shell_flag, Some(clap_complete::Shell::Bash));
-    rejects(&["fx", "completion"]);
+    rejects(&["gf", "completion"]);
 }
 
 #[test]
 fn repo_clone_passes_git_flags_after_a_double_dash() {
     let cli = parse(&[
-        "fx",
+        "gf",
         "repo",
         "clone",
         "ai/backend",
@@ -397,29 +397,29 @@ fn repo_clone_passes_git_flags_after_a_double_dash() {
 #[test]
 fn run_and_workflow_mirror_ghs_commands() {
     parse(&[
-        "fx", "run", "list", "-w", "default", "-b", "main", "-s", "failure", "-L", "5",
+        "gf", "run", "list", "-w", "default", "-b", "main", "-s", "failure", "-L", "5",
     ]);
-    parse(&["fx", "run", "view", "182", "--log-failed", "--exit-status"]);
-    parse(&["fx", "run", "view", "default/182", "-j", "build"]);
-    parse(&["fx", "run", "rerun", "182", "--failed"]);
-    parse(&["fx", "run", "watch", "182", "--exit-status", "-i", "5"]);
-    parse(&["fx", "run", "cancel", "182"]);
-    parse(&["fx", "run", "delete", "182"]);
-    parse(&["fx", "workflow", "list", "--all"]);
-    parse(&["fx", "workflow", "view", "default", "--yaml", "-r", "main"]);
-    parse(&["fx", "workflow", "run", "default", "--ref", "main"]);
-    parse(&["fx", "workflow", "enable", "default"]);
-    parse(&["fx", "workflow", "disable", "default"]);
+    parse(&["gf", "run", "view", "182", "--log-failed", "--exit-status"]);
+    parse(&["gf", "run", "view", "default/182", "-j", "build"]);
+    parse(&["gf", "run", "rerun", "182", "--failed"]);
+    parse(&["gf", "run", "watch", "182", "--exit-status", "-i", "5"]);
+    parse(&["gf", "run", "cancel", "182"]);
+    parse(&["gf", "run", "delete", "182"]);
+    parse(&["gf", "workflow", "list", "--all"]);
+    parse(&["gf", "workflow", "view", "default", "--yaml", "-r", "main"]);
+    parse(&["gf", "workflow", "run", "default", "--ref", "main"]);
+    parse(&["gf", "workflow", "enable", "default"]);
+    parse(&["gf", "workflow", "disable", "default"]);
 }
 
 #[test]
-fn every_gh_command_fx_supports_parses() {
+fn every_gh_command_gf_supports_parses() {
     for argv in [
-        vec!["fx", "pr", "close", "12", "-c", "bye", "-d"],
-        vec!["fx", "pr", "reopen", "12", "-c", "back"],
-        vec!["fx", "pr", "ready", "12", "--undo"],
+        vec!["gf", "pr", "close", "12", "-c", "bye", "-d"],
+        vec!["gf", "pr", "reopen", "12", "-c", "back"],
+        vec!["gf", "pr", "ready", "12", "--undo"],
         vec![
-            "fx",
+            "gf",
             "pr",
             "edit",
             "12",
@@ -430,12 +430,12 @@ fn every_gh_command_fx_supports_parses() {
             "--remove-label",
             "bug",
         ],
-        vec!["fx", "pr", "comment", "12", "-b", "hi"],
-        vec!["fx", "pr", "review", "12", "--approve", "-b", "LGTM"],
-        vec!["fx", "pr", "status", "--json=number"],
-        vec!["fx", "pr", "update-branch", "12", "--rebase"],
+        vec!["gf", "pr", "comment", "12", "-b", "hi"],
+        vec!["gf", "pr", "review", "12", "--approve", "-b", "LGTM"],
+        vec!["gf", "pr", "status", "--json=number"],
+        vec!["gf", "pr", "update-branch", "12", "--rebase"],
         vec![
-            "fx",
+            "gf",
             "pr",
             "checks",
             "12",
@@ -446,10 +446,10 @@ fn every_gh_command_fx_supports_parses() {
             "--required",
         ],
         vec![
-            "fx", "pr", "diff", "12", "--color", "never", "--patch", "-e", "*.lock",
+            "gf", "pr", "diff", "12", "--color", "never", "--patch", "-e", "*.lock",
         ],
         vec![
-            "fx",
+            "gf",
             "pr",
             "checkout",
             "12",
@@ -459,7 +459,7 @@ fn every_gh_command_fx_supports_parses() {
             "--recurse-submodules",
         ],
         vec![
-            "fx",
+            "gf",
             "repo",
             "create",
             "ai/new",
@@ -469,9 +469,9 @@ fn every_gh_command_fx_supports_parses() {
             "Rust",
             "-c",
         ],
-        vec!["fx", "repo", "delete", "ai/old", "--yes"],
+        vec!["gf", "repo", "delete", "ai/old", "--yes"],
         vec![
-            "fx",
+            "gf",
             "repo",
             "edit",
             "ai/x",
@@ -481,13 +481,13 @@ fn every_gh_command_fx_supports_parses() {
             "public",
             "--accept-visibility-change-consequences",
         ],
-        vec!["fx", "repo", "rename", "new", "--yes"],
-        vec!["fx", "repo", "fork", "ai/x", "--clone", "--fork-name", "y"],
-        vec!["fx", "repo", "sync", "--force", "-b", "main"],
-        vec!["fx", "repo", "set-default", "ai/x"],
-        vec!["fx", "repo", "set-default", "--view"],
+        vec!["gf", "repo", "rename", "new", "--yes"],
+        vec!["gf", "repo", "fork", "ai/x", "--clone", "--fork-name", "y"],
+        vec!["gf", "repo", "sync", "--force", "-b", "main"],
+        vec!["gf", "repo", "set-default", "ai/x"],
+        vec!["gf", "repo", "set-default", "--view"],
         vec![
-            "fx",
+            "gf",
             "repo",
             "read-file",
             "README.md",
@@ -496,11 +496,11 @@ fn every_gh_command_fx_supports_parses() {
             "-o",
             "out.md",
         ],
-        vec!["fx", "repo", "read-dir", "src"],
-        vec!["fx", "repo", "gitignore", "list"],
-        vec!["fx", "repo", "license", "view", "mit"],
+        vec!["gf", "repo", "read-dir", "src"],
+        vec!["gf", "repo", "gitignore", "list"],
+        vec!["gf", "repo", "license", "view", "mit"],
         vec![
-            "fx",
+            "gf",
             "repo",
             "list",
             "--visibility",
@@ -509,15 +509,15 @@ fn every_gh_command_fx_supports_parses() {
             "-S",
             "back",
         ],
-        vec!["fx", "repo", "view", "-w"],
-        vec!["fx", "secret", "list", "-o", "ai"],
-        vec!["fx", "secret", "set", "TOKEN", "-b", "value"],
-        vec!["fx", "secret", "set", "-f", ".env"],
-        vec!["fx", "secret", "delete", "TOKEN"],
-        vec!["fx", "secret", "remove", "TOKEN"],
-        vec!["fx", "label", "list", "-S", "bug", "--sort", "name"],
+        vec!["gf", "repo", "view", "-w"],
+        vec!["gf", "secret", "list", "-o", "ai"],
+        vec!["gf", "secret", "set", "TOKEN", "-b", "value"],
+        vec!["gf", "secret", "set", "-f", ".env"],
+        vec!["gf", "secret", "delete", "TOKEN"],
+        vec!["gf", "secret", "remove", "TOKEN"],
+        vec!["gf", "label", "list", "-S", "bug", "--sort", "name"],
         vec![
-            "fx",
+            "gf",
             "label",
             "create",
             "bug",
@@ -526,26 +526,26 @@ fn every_gh_command_fx_supports_parses() {
             "-d",
             "Something is broken",
         ],
-        vec!["fx", "label", "edit", "bug", "-n", "defect"],
-        vec!["fx", "label", "delete", "bug", "--yes"],
-        vec!["fx", "label", "clone", "ai/other", "--force"],
-        vec!["fx", "ssh-key", "list"],
-        vec!["fx", "ssh-key", "add", "key.pub", "-t", "laptop"],
-        vec!["fx", "ssh-key", "delete", "laptop", "-y"],
-        vec!["fx", "org", "list", "-L", "5"],
-        vec!["fx", "ruleset", "list"],
-        vec!["fx", "rs", "view", "CI_Check"],
-        vec!["fx", "codespace", "list"],
-        vec!["fx", "cs", "stop", "-c", "dev"],
-        vec!["fx", "browse", "12", "-n"],
-        vec!["fx", "browse", "src/main.rs:10", "-b", "main"],
-        vec!["fx", "browse", "--commit"],
-        vec!["fx", "status", "-o", "ai"],
-        vec!["fx", "alias", "set", "prs", "pr list"],
-        vec!["fx", "alias", "list"],
-        vec!["fx", "alias", "delete", "--all"],
-        vec!["fx", "auth", "token"],
-        vec!["fx", "auth", "status", "-t", "--json=hosts"],
+        vec!["gf", "label", "edit", "bug", "-n", "defect"],
+        vec!["gf", "label", "delete", "bug", "--yes"],
+        vec!["gf", "label", "clone", "ai/other", "--force"],
+        vec!["gf", "ssh-key", "list"],
+        vec!["gf", "ssh-key", "add", "key.pub", "-t", "laptop"],
+        vec!["gf", "ssh-key", "delete", "laptop", "-y"],
+        vec!["gf", "org", "list", "-L", "5"],
+        vec!["gf", "ruleset", "list"],
+        vec!["gf", "rs", "view", "CI_Check"],
+        vec!["gf", "codespace", "list"],
+        vec!["gf", "cs", "stop", "-c", "dev"],
+        vec!["gf", "browse", "12", "-n"],
+        vec!["gf", "browse", "src/main.rs:10", "-b", "main"],
+        vec!["gf", "browse", "--commit"],
+        vec!["gf", "status", "-o", "ai"],
+        vec!["gf", "alias", "set", "prs", "pr list"],
+        vec!["gf", "alias", "list"],
+        vec!["gf", "alias", "delete", "--all"],
+        vec!["gf", "auth", "token"],
+        vec!["gf", "auth", "status", "-t", "--json=hosts"],
     ] {
         parse(&argv);
     }
@@ -555,11 +555,11 @@ fn every_gh_command_fx_supports_parses() {
 fn a_gh_command_gitfox_lacks_parses_whatever_follows_it() {
     // `-h` included: it must reach the command, not print help and exit 0.
     for argv in [
-        vec!["fx", "issue", "list", "--state", "open", "-h", "host"],
-        vec!["fx", "release", "create", "v1.0", "--notes", "x"],
-        vec!["fx", "search", "prs", "--author", "@me"],
+        vec!["gf", "issue", "list", "--state", "open", "-h", "host"],
+        vec!["gf", "release", "create", "v1.0", "--notes", "x"],
+        vec!["gf", "search", "prs", "--author", "@me"],
         vec![
-            "fx",
+            "gf",
             "auth",
             "refresh",
             "-h",
@@ -567,16 +567,16 @@ fn a_gh_command_gitfox_lacks_parses_whatever_follows_it() {
             "-s",
             "repo",
         ],
-        vec!["fx", "pr", "lock", "12"],
-        vec!["fx", "repo", "deploy-key", "list"],
-        vec!["fx", "run", "download", "182", "-n", "artifact"],
-        vec!["fx", "codespace", "ssh", "-c", "dev"],
-        vec!["fx", "ruleset", "check", "main"],
-        vec!["fx", "ext", "install", "owner/gh-thing"],
+        vec!["gf", "pr", "lock", "12"],
+        vec!["gf", "repo", "deploy-key", "list"],
+        vec!["gf", "run", "download", "182", "-n", "artifact"],
+        vec!["gf", "codespace", "ssh", "-c", "dev"],
+        vec!["gf", "ruleset", "check", "main"],
+        vec!["gf", "ext", "install", "owner/gh-thing"],
     ] {
         parse(&argv);
     }
-    let cli = parse(&["fx", "issue", "view", "3", "-h", "x"]);
+    let cli = parse(&["gf", "issue", "view", "3", "-h", "x"]);
     let Command::GhOnly(GhOnlyCommand::Issue(args)) = cli.command else {
         panic!("expected issue")
     };
@@ -585,11 +585,11 @@ fn a_gh_command_gitfox_lacks_parses_whatever_follows_it() {
 
 #[test]
 fn jq_and_template_short_flags_are_per_command() {
-    let cli = parse(&["fx", "pr", "list", "--json=number", "-q", ".[]"]);
+    let cli = parse(&["gf", "pr", "list", "--json=number", "-q", ".[]"]);
     assert_eq!(cli.command.format().jq.as_deref(), Some(".[]"));
-    let cli = parse(&["fx", "repo", "view", "--json=name", "-t", "{{.name}}"]);
+    let cli = parse(&["gf", "repo", "view", "--json=name", "-t", "{{.name}}"]);
     assert_eq!(cli.command.format().template.as_deref(), Some("{{.name}}"));
     // `pr create -t` is still the title.
-    let cli = parse(&["fx", "pr", "create", "-t", "title"]);
+    let cli = parse(&["gf", "pr", "create", "-t", "title"]);
     assert!(cli.command.format().template.is_none());
 }

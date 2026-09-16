@@ -2,17 +2,17 @@
 //!
 //! Two gh behaviours cannot be expressed as clap flags:
 //!
-//! * **`--json FIELDS`.** In gh, `--json` takes a value; in fx it always meant
-//!   "JSON output" and takes none, which is how `fx --json pr list` reads. clap
+//! * **`--json FIELDS`.** In gh, `--json` takes a value; in gf it always meant
+//!   "JSON output" and takes none, which is how `gf --json pr list` reads. clap
 //!   can only offer an optional value greedily — `--json pr` would swallow the
 //!   subcommand — so the value is required to be attached (`--json=a,b`), and
 //!   this module attaches it: on a command that exports fields (one that takes
 //!   `--jq`, as in gh), a `--json` followed by something that looks like a field
 //!   list, and is not a subcommand name at that position, becomes
 //!   `--json=that`. Anywhere else the next word stays an argument, as it was in
-//!   fx 0.6. The walk uses the real command tree, so it knows which flags
+//!   gf 0.6. The walk uses the real command tree, so it knows which flags
 //!   consume the next token and which names are subcommands where.
-//! * **Aliases.** `fx alias set` shortcuts expand before parsing, and a `!` alias
+//! * **Aliases.** `gf alias set` shortcuts expand before parsing, and a `!` alias
 //!   runs through the shell instead.
 
 use std::ffi::OsString;
@@ -80,7 +80,7 @@ fn explicit_config(raw: &[OsString]) -> Option<std::path::PathBuf> {
 /// Replace a leading alias with its expansion.
 ///
 /// Only the first argument is considered, and never a built-in command name:
-/// an alias cannot change what `fx pr` means.
+/// an alias cannot change what `gf pr` means.
 pub fn expand_alias(
     raw: Vec<OsString>,
     root: &Command,
@@ -348,33 +348,33 @@ mod tests {
     #[test]
     fn a_field_list_after_json_becomes_its_value() {
         assert_eq!(
-            attach(&["fx", "pr", "list", "--json", "number,title"]),
-            ["fx", "pr", "list", "--json=number,title"]
+            attach(&["gf", "pr", "list", "--json", "number,title"]),
+            ["gf", "pr", "list", "--json=number,title"]
         );
         assert_eq!(
-            attach(&["fx", "pr", "view", "12", "--json", "title", "-q", ".title"]),
-            ["fx", "pr", "view", "12", "--json=title", "-q", ".title"]
+            attach(&["gf", "pr", "view", "12", "--json", "title", "-q", ".title"]),
+            ["gf", "pr", "view", "12", "--json=title", "-q", ".title"]
         );
         assert_eq!(
-            attach(&["fx", "repo", "view", "--json", "name"]),
-            ["fx", "repo", "view", "--json=name"]
+            attach(&["gf", "repo", "view", "--json", "name"]),
+            ["gf", "repo", "view", "--json=name"]
         );
     }
 
     #[test]
     fn a_subcommand_after_json_is_still_a_subcommand() {
-        // The original fx spelling must keep working.
+        // The original gf spelling must keep working.
         assert_eq!(
-            attach(&["fx", "--json", "pr", "list"]),
-            ["fx", "--json", "pr", "list"]
+            attach(&["gf", "--json", "pr", "list"]),
+            ["gf", "--json", "pr", "list"]
         );
         assert_eq!(
-            attach(&["fx", "pr", "--json", "status"]),
-            ["fx", "pr", "--json", "status"]
+            attach(&["gf", "pr", "--json", "status"]),
+            ["gf", "pr", "--json", "status"]
         );
         assert_eq!(
-            attach(&["fx", "--json", "api", "/api/v1/user"]),
-            ["fx", "--json", "api", "/api/v1/user"]
+            attach(&["gf", "--json", "api", "/api/v1/user"]),
+            ["gf", "--json", "api", "/api/v1/user"]
         );
     }
 
@@ -383,45 +383,45 @@ mod tests {
         // `view` is the value of -R here, not a subcommand, so the walk goes
         // on to `pr list` and the `--json` after it is gh's.
         assert_eq!(
-            attach(&["fx", "pr", "-R", "view", "list", "--json", "number"]),
-            ["fx", "pr", "-R", "view", "list", "--json=number"]
+            attach(&["gf", "pr", "-R", "view", "list", "--json", "number"]),
+            ["gf", "pr", "-R", "view", "list", "--json=number"]
         );
         assert_eq!(
-            attach(&["fx", "-R", "ai/backend", "pr", "list", "--json", "state"]),
-            ["fx", "-R", "ai/backend", "pr", "list", "--json=state"]
+            attach(&["gf", "-R", "ai/backend", "pr", "list", "--json", "state"]),
+            ["gf", "-R", "ai/backend", "pr", "list", "--json=state"]
         );
         assert_eq!(
-            attach(&["fx", "run", "list", "-L5", "--json", "status"]),
-            ["fx", "run", "list", "-L5", "--json=status"]
+            attach(&["gf", "run", "list", "-L5", "--json", "status"]),
+            ["gf", "run", "list", "-L5", "--json=status"]
         );
     }
 
     #[test]
     fn a_number_or_path_after_json_is_left_alone() {
         assert_eq!(
-            attach(&["fx", "pr", "view", "--json", "12"]),
-            ["fx", "pr", "view", "--json", "12"]
+            attach(&["gf", "pr", "view", "--json", "12"]),
+            ["gf", "pr", "view", "--json", "12"]
         );
         assert_eq!(
-            attach(&["fx", "pr", "list", "--json", "--", "number"]),
-            ["fx", "pr", "list", "--json", "--", "number"]
+            attach(&["gf", "pr", "list", "--json", "--", "number"]),
+            ["gf", "pr", "list", "--json", "--", "number"]
         );
     }
 
     #[test]
     fn a_word_after_json_stays_an_argument_where_no_fields_are_exported() {
-        // fx 0.6 spellings on commands without gh's `--json FIELDS`.
+        // gf 0.6 spellings on commands without gh's `--json FIELDS`.
         assert_eq!(
-            attach(&["fx", "pipeline", "run", "--json", "default"]),
-            ["fx", "pipeline", "run", "--json", "default"]
+            attach(&["gf", "pipeline", "run", "--json", "default"]),
+            ["gf", "pipeline", "run", "--json", "default"]
         );
         assert_eq!(
-            attach(&["fx", "pr", "checkout", "--json", "feat_oauth"]),
-            ["fx", "pr", "checkout", "--json", "feat_oauth"]
+            attach(&["gf", "pr", "checkout", "--json", "feat_oauth"]),
+            ["gf", "pr", "checkout", "--json", "feat_oauth"]
         );
         assert_eq!(
-            attach(&["fx", "--json", "number", "pr", "list"]),
-            ["fx", "--json", "number", "pr", "list"]
+            attach(&["gf", "--json", "number", "pr", "list"]),
+            ["gf", "--json", "number", "pr", "list"]
         );
     }
 
@@ -448,21 +448,21 @@ mod tests {
         let table = aliases(&[
             ("prs", "pr list --author $1"),
             ("co2", "pr checkout"),
-            ("mine", "!fx pr list | head -$1"),
+            ("mine", "!gf pr list | head -$1"),
         ]);
 
         assert_eq!(
-            expand_alias(os(&["fx", "prs", "whw", "-L", "5"]), &root, &table),
-            Invocation::Args(os(&["fx", "pr", "list", "--author", "whw", "-L", "5"]))
+            expand_alias(os(&["gf", "prs", "whw", "-L", "5"]), &root, &table),
+            Invocation::Args(os(&["gf", "pr", "list", "--author", "whw", "-L", "5"]))
         );
         assert_eq!(
-            expand_alias(os(&["fx", "co2", "12"]), &root, &table),
-            Invocation::Args(os(&["fx", "pr", "checkout", "12"]))
+            expand_alias(os(&["gf", "co2", "12"]), &root, &table),
+            Invocation::Args(os(&["gf", "pr", "checkout", "12"]))
         );
         assert_eq!(
-            expand_alias(os(&["fx", "mine", "3"]), &root, &table),
+            expand_alias(os(&["gf", "mine", "3"]), &root, &table),
             Invocation::Shell {
-                script: "fx pr list | head -$1".into(),
+                script: "gf pr list | head -$1".into(),
                 args: vec!["3".into()],
             }
         );
@@ -473,8 +473,8 @@ mod tests {
         let root = built_command();
         let table = aliases(&[("pr", "repo list")]);
         assert_eq!(
-            expand_alias(os(&["fx", "pr", "list"]), &root, &table),
-            Invocation::Args(os(&["fx", "pr", "list"]))
+            expand_alias(os(&["gf", "pr", "list"]), &root, &table),
+            Invocation::Args(os(&["gf", "pr", "list"]))
         );
     }
 

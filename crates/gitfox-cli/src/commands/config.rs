@@ -1,8 +1,8 @@
-//! `fx config` — inspect and edit the config file.
+//! `gf config` — inspect and edit the config file.
 //!
 //! The keys include gh's (`git_protocol`, `editor`, `browser`, `pager`,
 //! `prompt`), and `-h HOST` scopes one to a host the way `gh config --host`
-//! does. Tokens are not addressable here by design: `fx config set` cannot
+//! does. Tokens are not addressable here by design: `gf config set` cannot
 //! write a credential into a plain-text file even by accident.
 
 use serde_json::{Value, json};
@@ -211,7 +211,7 @@ fn set(args: ConfigSetArgs, ctx: &Context) -> Result<()> {
     if matches!(key, Key::Top(TopField::Pager)) {
         // Saved so a gh setup script runs, but saying nothing would let it look
         // like it took effect.
-        ctx.warn("fx does not page its output; `pager` is saved but has no effect");
+        ctx.warn("gf does not page its output; `pager` is saved but has no effect");
     }
     ctx.renderer.emit(&Entry {
         key: args.key,
@@ -406,7 +406,7 @@ impl Render for ClearedCache {
         } else {
             ("", "")
         };
-        format!("{green}✓{reset} Cleared the cache (fx keeps none)")
+        format!("{green}✓{reset} Cleared the cache (gf keeps none)")
     }
 }
 

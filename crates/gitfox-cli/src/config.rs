@@ -36,7 +36,14 @@ pub const DEFAULT_TIMEOUT_SECS: u64 = gitfox_client::DEFAULT_TIMEOUT_SECS;
 pub const DEFAULT_RETRIES: u32 = gitfox_client::DEFAULT_RETRIES;
 
 /// Service name used for the OS keychain entries.
-pub const KEYRING_SERVICE: &str = "fx-gitfox";
+pub const KEYRING_SERVICE: &str = "gf-gitfox";
+/// What the keychain entries were called while the binary was `fx`, up to 0.6.
+/// Read as a fallback so a rename does not silently log anyone out.
+pub const LEGACY_KEYRING_SERVICE: &str = "fx-gitfox";
+
+/// The config directory name, and the one used up to 0.6.
+const CONFIG_DIR: &str = "gf";
+const LEGACY_CONFIG_DIR: &str = "fx";
 
 // ---------------------------------------------------------------------------
 // Secrets
@@ -72,7 +79,7 @@ impl fmt::Display for Secret {
     }
 }
 
-/// Where the token came from — reported by `fx auth status`, never the value.
+/// Where the token came from — reported by `gf auth status`, never the value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenSource {
     Flag,
@@ -164,7 +171,7 @@ pub struct Overrides {
 #[derive(Debug, Default, Clone)]
 pub struct GitContext {
     pub remotes: Vec<crate::git::Remote>,
-    /// What `fx repo set-default` recorded for this checkout. Explicit, so it
+    /// What `gf repo set-default` recorded for this checkout. Explicit, so it
     /// outranks whatever the remotes suggest.
     pub default_repo: Option<String>,
 }
@@ -180,7 +187,7 @@ impl GitContext {
 
     /// The repository, but only from a remote that points at `host_key`.
     ///
-    /// This gate is the whole point. Without it, running fx inside a checkout
+    /// This gate is the whole point. Without it, running gf inside a checkout
     /// of some other host — a GitHub clone, say — infers that project's
     /// `owner/name` and asks GitFox about it, producing a confident
     /// REPO_NOT_FOUND that reads like a permissions problem. A remote whose
@@ -237,7 +244,7 @@ impl Tty {
 pub struct ConfigFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_host: Option<String>,
-    /// `https` or `ssh`: how `fx repo clone` and friends talk to git. The same
+    /// `https` or `ssh`: how `gf repo clone` and friends talk to git. The same
     /// key gh uses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_protocol: Option<String>,
@@ -255,7 +262,7 @@ pub struct ConfigFile {
     pub prompt: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub hosts: BTreeMap<String, HostConfig>,
-    /// `fx alias set` shortcuts: name → expansion. A leading `!` runs the
+    /// `gf alias set` shortcuts: name → expansion. A leading `!` runs the
     /// expansion through the shell.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub aliases: BTreeMap<String, String>,
@@ -311,8 +318,13 @@ impl ConfigFile {
     }
 }
 
-/// `$GITFOX_CONFIG`, else `$XDG_CONFIG_HOME/fx/config.toml`, else
-/// `~/.config/fx/config.toml` (and the platform config dir on Windows).
+/// `$GITFOX_CONFIG`, else `$XDG_CONFIG_HOME/gf/config.toml`, else
+/// `~/.config/gf/config.toml` (and the platform config dir on Windows).
+///
+/// The binary was called `fx` up to 0.6 and kept its config under `fx/`. That
+/// file is adopted where it is — used for reads *and* writes — when the `gf`
+/// one does not exist yet, so an upgrade neither loses settings nor leaves two
+/// files to drift apart.
 pub fn config_path(env: &dyn EnvSource, cli_path: Option<&Path>) -> Result<PathBuf> {
     if let Some(path) = cli_path {
         return Ok(path.to_path_buf());
@@ -320,21 +332,34 @@ pub fn config_path(env: &dyn EnvSource, cli_path: Option<&Path>) -> Result<PathB
     if let Some(path) = env.get(ENV_CONFIG) {
         return Ok(PathBuf::from(path));
     }
+    Ok(in_config_home(&config_home(env)?))
+}
+
+/// The directory `<name>/config.toml` sits in.
+fn config_home(env: &dyn EnvSource) -> Result<PathBuf> {
     if cfg!(windows) {
         let dirs = directories::BaseDirs::new()
             .ok_or_else(|| CliError::config("could not determine the user config directory"))?;
-        return Ok(dirs.config_dir().join("fx").join("config.toml"));
+        return Ok(dirs.config_dir().to_path_buf());
     }
     if let Some(xdg) = env.get("XDG_CONFIG_HOME") {
-        return Ok(PathBuf::from(xdg).join("fx").join("config.toml"));
+        return Ok(PathBuf::from(xdg));
     }
     let dirs = directories::BaseDirs::new()
         .ok_or_else(|| CliError::config("could not determine the home directory"))?;
-    Ok(dirs
-        .home_dir()
-        .join(".config")
-        .join("fx")
-        .join("config.toml"))
+    Ok(dirs.home_dir().join(".config"))
+}
+
+/// The current path, unless only the pre-0.7 `fx` one is on disk.
+fn in_config_home(home: &Path) -> PathBuf {
+    let path = home.join(CONFIG_DIR).join("config.toml");
+    if !path.exists() {
+        let legacy = home.join(LEGACY_CONFIG_DIR).join("config.toml");
+        if legacy.exists() {
+            return legacy;
+        }
+    }
+    path
 }
 
 // ---------------------------------------------------------------------------
@@ -717,7 +742,7 @@ mod tests {
 
     #[test]
     fn a_checkout_of_another_host_contributes_no_repository() {
-        // Running fx inside a GitHub clone while pointed at GitFox: the remote
+        // Running gf inside a GitHub clone while pointed at GitFox: the remote
         // has a perfectly good `owner/name` that means nothing to the instance
         // being asked, and adopting it produces a confident REPO_NOT_FOUND that
         // reads like a permissions problem.
@@ -1089,6 +1114,38 @@ mod tests {
         assert!(!text.to_lowercase().contains("token"), "{text}");
         let parsed = ConfigFile::parse(&text).unwrap();
         assert_eq!(parsed.default_host.as_deref(), Some("git.example.com"));
+    }
+
+    /// `home/<dir>/config.toml`, created.
+    fn write_config(home: &Path, dir: &str) -> PathBuf {
+        let path = home.join(dir).join("config.toml");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "").unwrap();
+        path
+    }
+
+    #[test]
+    fn a_fresh_machine_gets_the_current_config_path() {
+        let home = tempfile::TempDir::new().unwrap();
+        assert_eq!(
+            in_config_home(home.path()),
+            home.path().join(CONFIG_DIR).join("config.toml")
+        );
+    }
+
+    #[test]
+    fn the_pre_0_7_config_is_adopted_where_it_lies() {
+        let home = tempfile::TempDir::new().unwrap();
+        let legacy = write_config(home.path(), LEGACY_CONFIG_DIR);
+        assert_eq!(in_config_home(home.path()), legacy);
+    }
+
+    #[test]
+    fn the_current_config_wins_when_both_exist() {
+        let home = tempfile::TempDir::new().unwrap();
+        write_config(home.path(), LEGACY_CONFIG_DIR);
+        let current = write_config(home.path(), CONFIG_DIR);
+        assert_eq!(in_config_home(home.path()), current);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! `fx repo` — repositories, with gh's commands and flags.
+//! `gf repo` — repositories, with gh's commands and flags.
 
 mod content;
 mod manage;
@@ -38,7 +38,7 @@ pub async fn run(cmd: RepoCommand, ctx: &Context) -> Result<()> {
         }
         RepoSubcommand::DeployKey(_) => super::gh_only::refuse(
             "repo deploy-key",
-            "GitFox has no deploy keys; use a service account's token, or `fx ssh-key add`",
+            "GitFox has no deploy keys; use a service account's token, or `gf ssh-key add`",
         ),
         RepoSubcommand::Autolink(_) => {
             super::gh_only::refuse("repo autolink", "GitFox has no autolinks")
@@ -238,7 +238,7 @@ async fn clone(args: RepoCloneArgs, ctx: &Context) -> Result<()> {
         .unwrap_or_else(|| std::path::PathBuf::from(repo.name()));
 
     // git owns the terminal from here: it prints its own progress and asks for
-    // its own credentials. fx does not put the token in the URL — that would
+    // its own credentials. gf does not put the token in the URL — that would
     // write it into .git/config, where it outlives the command.
     git::clone(url, &destination, &args.git_flags).map_err(|message| {
         CliError::new(ErrorCode::Unexpected, message)
@@ -291,7 +291,7 @@ pub(crate) fn use_ssh(ctx: &Context, flag: bool) -> bool {
 // fields
 // ---------------------------------------------------------------------------
 
-/// Every field `--json` accepts on a repository: gh's names, then fx's own.
+/// Every field `--json` accepts on a repository: gh's names, then gf's own.
 pub const REPO_FIELDS: &[&str] = &[
     "archivedAt",
     "assignableUsers",
@@ -360,7 +360,7 @@ pub const REPO_FIELDS: &[&str] = &[
     "viewerSubscription",
     "visibility",
     "watchers",
-    // fx's own names
+    // gf's own names
     "repository",
     "default_branch",
     "is_public",
@@ -828,7 +828,7 @@ mod tests {
         };
         let value = cloned.to_json();
         assert_eq!(value["directory"], "backend");
-        // No credential is ever spliced into the URL fx reports or uses.
+        // No credential is ever spliced into the URL gf reports or uses.
         assert!(!value["url"].as_str().unwrap().contains('@'));
         assert!(
             cloned

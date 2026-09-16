@@ -1,4 +1,4 @@
-//! `fx` — GitFox CLI for humans, CI and AI agents.
+//! `gf` — GitFox CLI for humans, CI and AI agents.
 //!
 //! The whole binary is a thin shell around three ideas:
 //!
@@ -76,7 +76,7 @@ fn run_shell_alias(script: &str, args: &[String]) -> ExitCode {
     match std::process::Command::new(shell)
         .arg(flag)
         .arg(script)
-        .arg("fx-alias")
+        .arg("gf-alias")
         .args(args)
         .status()
     {

@@ -1,4 +1,4 @@
-//! `fx pr`.
+//! `gf pr`.
 
 use std::path::PathBuf;
 

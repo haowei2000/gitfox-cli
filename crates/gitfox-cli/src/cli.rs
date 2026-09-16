@@ -1,7 +1,7 @@
 //! The command surface.
 //!
 //! Environment variables are *not* wired through clap's `env` support on
-//! purpose: clap would resolve them before `fx` gets a chance to apply the
+//! purpose: clap would resolve them before `gf` gets a chance to apply the
 //! documented precedence chain. Flags land here as `Option`, and
 //! [`crate::config::resolve`] owns the chain.
 //!
@@ -30,14 +30,14 @@ pub use pr::*;
 pub use repo::*;
 
 const LONG_ABOUT: &str = "\
-fx is a GitFox client with three audiences.
+gf is a GitFox client with three audiences.
 
-  you    fx pr list
-  CI     GITFOX_TOKEN=$TOKEN fx --agent pipeline list
-  agent  fx --agent pr list
+  you    gf pr list
+  CI     GITFOX_TOKEN=$TOKEN gf --agent pipeline list
+  agent  gf --agent pr list
 
 `--agent` is shorthand for `--output json --non-interactive --no-color`: it
-tells fx the caller is a machine. Every command then answers with a stable
+tells gf the caller is a machine. Every command then answers with a stable
 envelope ({\"ok\":true,\"data\":…} / {\"ok\":false,\"error\":…}) and a stable exit
 code, so nothing has to be parsed out of prose.
 
@@ -46,7 +46,7 @@ gh, so what works with `gh` works here.";
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "fx",
+    name = "gf",
     version,
     about = "GitFox CLI for humans, CI and AI agents",
     long_about = LONG_ABOUT,
@@ -176,25 +176,25 @@ impl FormatArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Authenticate fx and git with a GitFox host
+    /// Authenticate gf and git with a GitFox host
     Auth(AuthCommand),
 
     /// Make an authenticated request to any GitFox API endpoint
     #[command(long_about = "\
 Make an authenticated request to any GitFox API endpoint.
 
-This is the escape hatch: anything GitFox exposes is reachable from fx on day
+This is the escape hatch: anything GitFox exposes is reachable from gf on day
 one, whether or not a dedicated command exists yet. The flags are gh's.
 
-  fx api /api/v1/user
-  fx api -X POST /api/v1/foo -F count=3 -f name=test
-  fx api /api/v1/repos/{repo_ref}/pullreq --paginate --jq '.[].title'
-  cat payload.json | fx api POST /api/v1/foo --input -
+  gf api /api/v1/user
+  gf api -X POST /api/v1/foo -F count=3 -f name=test
+  gf api /api/v1/repos/{repo_ref}/pullreq --paginate --jq '.[].title'
+  cat payload.json | gf api POST /api/v1/foo --input -
 
 -F/--field sends typed values (integers, true/false/null, @file); -f/--raw-field
 always sends strings. They are the JSON body, or the query string on a GET:
 
-  fx api -X GET /api/v1/repos/{repo_ref}/pullreq -f state=merged -F limit=5
+  gf api -X GET /api/v1/repos/{repo_ref}/pullreq -f state=merged -F limit=5
 
 {owner}, {repo}, {repo_ref} and {branch} are filled in from the current
 checkout, in the path and in -F values.")]
@@ -250,7 +250,7 @@ checkout, in the path and in -F values.")]
     /// Alias for "pr checkout"
     Co(PrCheckoutArgs),
 
-    /// Read and write fx configuration
+    /// Read and write gf configuration
     Config(ConfigCommand),
 
     #[command(flatten)]
@@ -261,13 +261,13 @@ checkout, in the path and in -F values.")]
 Print a shell completion script.
 
   # zsh
-  fx completion zsh > ~/.zfunc/_fx
+  gf completion zsh > ~/.zfunc/_gf
 
   # bash
-  fx completion -s bash > /usr/local/etc/bash_completion.d/fx
+  gf completion -s bash > /usr/local/etc/bash_completion.d/gf
 
   # fish
-  fx completion fish > ~/.config/fish/completions/fx.fish")]
+  gf completion fish > ~/.config/fish/completions/gf.fish")]
     Completion(CompletionArgs),
 }
 

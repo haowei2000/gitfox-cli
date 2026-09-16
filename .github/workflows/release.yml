@@ -21,21 +21,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: fx-darwin-aarch64
+          - name: gf-darwin-aarch64
             os: macos-latest
             target: aarch64-apple-darwin
-          - name: fx-darwin-x86_64
+          - name: gf-darwin-x86_64
             os: macos-latest
             target: x86_64-apple-darwin
-          - name: fx-linux-x86_64
+          - name: gf-linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             features: vendored-keychain
-          - name: fx-linux-aarch64
+          - name: gf-linux-aarch64
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             features: vendored-keychain
-          - name: fx-windows-x86_64
+          - name: gf-windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
 
@@ -70,10 +70,10 @@ jobs:
         # it, so this is skipped for the one target that is not native.
         if: matrix.target != 'x86_64-apple-darwin'
         run: |
-          BIN=target/${{ matrix.target }}/release/fx
+          BIN=target/${{ matrix.target }}/release/gf
           [ "${{ runner.os }}" = "Windows" ] && BIN="$BIN.exe"
           "$BIN" --version
-          test "$("$BIN" --version)" = "fx ${GITHUB_REF_NAME#v}" || \
+          test "$("$BIN" --version)" = "gf ${GITHUB_REF_NAME#v}" || \
             echo "note: version is $("$BIN" --version), ref is ${GITHUB_REF_NAME}"
 
       - name: Package
@@ -83,10 +83,10 @@ jobs:
           SRC=target/${{ matrix.target }}/release
           cp README.md LICENSE CHANGELOG.md staging/
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp "$SRC/fx.exe" staging/
+            cp "$SRC/gf.exe" staging/
             (cd staging && 7z a -tzip "../dist/${{ matrix.name }}.zip" .)
           else
-            cp "$SRC/fx" staging/
+            cp "$SRC/gf" staging/
             tar -czf "dist/${{ matrix.name }}.tar.gz" -C staging .
           fi
           ls -l dist
