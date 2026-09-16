@@ -28,7 +28,7 @@
 //! nothing here depends on it.
 //!
 //! The diff endpoint content-negotiates: `application/json` yields per-file
-//! entries, `text/plain` a raw unified diff. `fx pr diff` picks by output mode.
+//! entries, `text/plain` a raw unified diff. `gf pr diff` picks by output mode.
 
 use serde_json::json;
 
@@ -131,7 +131,7 @@ impl<'a> PullRequestsApi<'a> {
 
     /// The open pull request whose source branch is `branch`, if there is one.
     ///
-    /// This is how `fx pr view` works with no number: the branch you are
+    /// This is how `gf pr view` works with no number: the branch you are
     /// standing on identifies the pull request.
     pub async fn find_for_branch(
         &self,
@@ -217,7 +217,7 @@ impl<'a> PullRequestsApi<'a> {
     /// `DELETE /api/v1/repos/{repo_ref}/pullreq/{pullreq_number}/branch`
     ///
     /// Separate from the merge call: GitFox has no `delete_branch` flag on
-    /// merge, so `fx pr merge --delete-branch` is two requests.
+    /// merge, so `gf pr merge --delete-branch` is two requests.
     pub async fn delete_source_branch(&self, repo: &RepoRef, number: u64) -> Result<()> {
         self.client
             .request(

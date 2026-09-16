@@ -6,24 +6,36 @@
 
 use keyring::Entry;
 
-use crate::config::{KEYRING_SERVICE, Secret};
+use crate::config::{KEYRING_SERVICE, LEGACY_KEYRING_SERVICE, Secret};
 use crate::error::{CliError, ErrorCode, Result};
 
 fn entry(host_key: &str) -> Result<Entry> {
-    Entry::new(KEYRING_SERVICE, host_key)
+    entry_in(KEYRING_SERVICE, host_key)
+}
+
+fn entry_in(service: &str, host_key: &str) -> Result<Entry> {
+    Entry::new(service, host_key)
         .map_err(|e| CliError::config(format!("could not open the keychain: {e}")))
 }
 
 /// Look up a stored token. Returns `None` when there is no entry *and* when the
 /// keychain cannot be reached at all — a headless machine should fall through
 /// to the environment, not fail.
+///
+/// The entries the `fx` binary wrote up to 0.6 are read too, so the rename does
+/// not quietly log anyone out. A token found there is left there; the next
+/// `gf auth login` writes under the current name.
 pub fn get(host_key: &str) -> Option<Secret> {
-    match entry(host_key).ok()?.get_password() {
+    lookup(KEYRING_SERVICE, host_key).or_else(|| lookup(LEGACY_KEYRING_SERVICE, host_key))
+}
+
+fn lookup(service: &str, host_key: &str) -> Option<Secret> {
+    match entry_in(service, host_key).ok()?.get_password() {
         Ok(token) if !token.trim().is_empty() => Some(Secret::new(token)),
         Ok(_) => None,
         Err(keyring::Error::NoEntry) => None,
         Err(e) => {
-            tracing::debug!(host = host_key, error = %e, "keychain lookup failed");
+            tracing::debug!(host = host_key, service, error = %e, "keychain lookup failed");
             None
         }
     }
@@ -38,9 +50,16 @@ pub fn set(host_key: &str, token: &str) -> Result<()> {
     })
 }
 
-/// Returns whether an entry was actually removed.
+/// Returns whether an entry was actually removed. Both names are cleared: a
+/// logout that left the pre-0.7 entry behind would log straight back in.
 pub fn delete(host_key: &str) -> Result<bool> {
-    match entry(host_key)?.delete_credential() {
+    let removed = remove(KEYRING_SERVICE, host_key)?;
+    let legacy = remove(LEGACY_KEYRING_SERVICE, host_key)?;
+    Ok(removed || legacy)
+}
+
+fn remove(service: &str, host_key: &str) -> Result<bool> {
+    match entry_in(service, host_key)?.delete_credential() {
         Ok(()) => Ok(true),
         Err(keyring::Error::NoEntry) => Ok(false),
         Err(e) => Err(CliError::new(

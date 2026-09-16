@@ -1,4 +1,4 @@
-//! `fx label` — repository labels.
+//! `gf label` — repository labels.
 //!
 //! GitFox labels differ from GitHub's in two ways the commands absorb: a label
 //! has a key (and may carry values, `priority:high`), and its colour is one of
@@ -296,7 +296,7 @@ const LABEL_FIELDS: &[&str] = &[
     "name",
     "updatedAt",
     "url",
-    // fx's own names
+    // gf's own names
     "key",
     "type",
     "scope",

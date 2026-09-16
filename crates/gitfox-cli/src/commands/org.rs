@@ -1,4 +1,4 @@
-//! `fx org list` — the spaces you belong to. A GitFox space is the nearest
+//! `gf org list` — the spaces you belong to. A GitFox space is the nearest
 //! thing to a GitHub organisation.
 
 use gitfox_client::Membership;

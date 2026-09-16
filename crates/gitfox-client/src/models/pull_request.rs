@@ -257,7 +257,7 @@ pub struct MergePullRequest {
 /// The answer to a merge attempt.
 ///
 /// A `dry_run` merge returns the same shape with `mergeable` telling you whether
-/// the real thing would work — which is what `fx pr merge --dry-run` reports.
+/// the real thing would work — which is what `gf pr merge --dry-run` reports.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MergeResult {
     #[serde(default)]

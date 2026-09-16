@@ -69,7 +69,7 @@ where
 
 /// [`collect`], for a filter the server cannot apply.
 ///
-/// `--draft` and `fx run list --status` narrow what GitFox returns, so a page
+/// `--draft` and `gf run list --status` narrow what GitFox returns, so a page
 /// of `want + 1` rows can hold fewer matches than that. Pages are read at the
 /// server's maximum until `want + 1` rows *match* or the collection ends,
 /// which keeps `truncated` an observation rather than a guess even though the

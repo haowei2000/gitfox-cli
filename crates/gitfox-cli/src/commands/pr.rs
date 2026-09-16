@@ -1,4 +1,4 @@
-//! `fx pr` — pull requests, with gh's commands and flags.
+//! `gf pr` — pull requests, with gh's commands and flags.
 //!
 //! Every command here works without arguments inside a checkout: the repository
 //! comes from the git remote and, where a pull request is optional, it is the
@@ -144,7 +144,7 @@ pub async fn resolve(
             let branch = ctx.branch()?;
             find_for_branch(client, &repo, branch)
                 .await
-                .map_err(|e| e.with_hint("pass a number, or open one with `fx pr create`"))?
+                .map_err(|e| e.with_hint("pass a number, or open one with `gf pr create`"))?
         }
     };
     Ok(Target { repo, pr })
@@ -211,7 +211,7 @@ pub async fn resolve_label(
         .find(|l| l.key.eq_ignore_ascii_case(key))
         .ok_or_else(|| {
             CliError::new(ErrorCode::NotFound, format!("no label `{key}` in {repo}"))
-                .with_hint("see `fx label list`, or create it with `fx label create`")
+                .with_hint("see `gf label list`, or create it with `gf label create`")
         })?;
     let Some(value) = value.filter(|v| !v.is_empty()) else {
         return Ok((label.id, None, None));
@@ -458,13 +458,13 @@ async fn create(args: PrCreateArgs, ctx: &Context) -> Result<()> {
     if args.recover.is_some() {
         return Err(CliError::unsupported(
             "`--recover`",
-            "fx keeps no record of a failed create to recover from",
+            "gf keeps no record of a failed create to recover from",
         ));
     }
     if !args.attach.is_empty() {
         return Err(CliError::unsupported(
             "`--attach`",
-            "fx cannot upload attachments to a GitFox pull request",
+            "gf cannot upload attachments to a GitFox pull request",
         ));
     }
 
@@ -1604,7 +1604,7 @@ const CHECK_FIELDS: &[&str] = &[
     "startedAt",
     "state",
     "workflow",
-    // fx's own names
+    // gf's own names
     "status",
     "required",
     "summary",

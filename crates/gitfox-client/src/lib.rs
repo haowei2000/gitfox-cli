@@ -2,7 +2,7 @@
 //!
 //! This crate knows about HTTP and about GitFox. It knows nothing about
 //! terminals, tables, exit codes or configuration files. That separation is
-//! what lets `fx` (the CLI) and, later, `fx-mcp` (the MCP server) share one
+//! what lets `gf` (the CLI) and, later, `gf-mcp` (the MCP server) share one
 //! implementation instead of the MCP server shelling out to the CLI.
 //!
 //! ```no_run

@@ -16,10 +16,10 @@ use wiremock::matchers::{
 };
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-/// `fx` isolated from the developer's environment, pointed at `server`, in
+/// `gf` isolated from the developer's environment, pointed at `server`, in
 /// `ai/backend`.
-fn fx(home: &Path, server: &MockServer) -> Command {
-    let mut cmd = Command::cargo_bin("fx").expect("the fx binary should build");
+fn gf(home: &Path, server: &MockServer) -> Command {
+    let mut cmd = Command::cargo_bin("gf").expect("the gf binary should build");
     for key in [
         "GITFOX_HOST",
         "GITFOX_TOKEN",
@@ -99,7 +99,7 @@ async fn mount_pr(server: &MockServer, value: Value) {
 }
 
 // ---------------------------------------------------------------------------
-// fx api
+// gf api
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
@@ -116,7 +116,7 @@ async fn api_capital_f_is_typed_and_lowercase_f_is_a_string_as_in_gh() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args([
             "api",
             "-X",
@@ -154,7 +154,7 @@ async fn api_paginate_walks_the_pages_and_jq_filters_the_whole() {
     }
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args([
             "api",
             "/api/v1/things?limit=2",
@@ -179,7 +179,7 @@ async fn api_placeholders_are_filled_from_the_repository() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args(["--agent", "api", "/api/v1/repos/{repo_ref}/pullreq"])
         .output()
         .unwrap();
@@ -202,7 +202,7 @@ async fn api_fields_on_a_get_are_the_query_string_as_in_gh() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args([
             "api",
             "-X",
@@ -232,7 +232,7 @@ async fn api_fields_beside_an_input_body_are_the_query_string() {
 
     let home = TempDir::new().unwrap();
     std::fs::write(home.path().join("body.json"), r#"{"name":"x"}"#).unwrap();
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args([
             "api",
             "/api/v1/things",
@@ -264,7 +264,7 @@ async fn api_nested_fields_and_value_placeholders_build_the_body_as_gh_does() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args([
             "api",
             "/api/v1/things",
@@ -303,7 +303,7 @@ async fn json_fields_given_the_gh_way_select_those_fields_without_an_envelope() 
     let home = TempDir::new().unwrap();
 
     // `--json number,title` with a space, exactly as gh takes it.
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args([
             "pr",
             "list",
@@ -331,7 +331,7 @@ async fn jq_and_template_shape_the_selected_fields() {
     mount_pr_list(&server).await;
     let home = TempDir::new().unwrap();
 
-    let jq = fx(home.path(), &server)
+    let jq = gf(home.path(), &server)
         .args([
             "pr",
             "list",
@@ -345,7 +345,7 @@ async fn jq_and_template_shape_the_selected_fields() {
     assert_eq!(code(&jq), 0, "{}", describe(&jq));
     assert_eq!(stdout(&jq), "#12 feat: add OAuth\n");
 
-    let template = fx(home.path(), &server)
+    let template = gf(home.path(), &server)
         .args([
             "pr",
             "list",
@@ -366,7 +366,7 @@ async fn an_unknown_field_is_named_and_the_available_ones_listed() {
     mount_pr_list(&server).await;
     let home = TempDir::new().unwrap();
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args(["--agent", "pr", "list", "--json", "nope"])
         .output()
         .unwrap();
@@ -384,14 +384,14 @@ async fn jq_without_fields_is_refused_and_plain_json_keeps_its_envelope() {
     mount_pr_list(&server).await;
     let home = TempDir::new().unwrap();
 
-    let refused = fx(home.path(), &server)
+    let refused = gf(home.path(), &server)
         .args(["pr", "list", "--jq", "."])
         .output()
         .unwrap();
     assert_eq!(code(&refused), 2, "{}", describe(&refused));
 
-    // fx 0.6's `--json pr list` still means the envelope.
-    let envelope = fx(home.path(), &server)
+    // gf 0.6's `--json pr list` still means the envelope.
+    let envelope = gf(home.path(), &server)
         .args(["--json", "pr", "list"])
         .output()
         .unwrap();
@@ -433,8 +433,8 @@ async fn pr_checks_exits_like_gh_for_a_person_and_zero_for_json() {
     let home = TempDir::new().unwrap();
 
     // A red check: exit 1 with the table on stdout, as `gh pr checks` does —
-    // so `fx pr checks && deploy` no longer deploys.
-    let failed = fx(home.path(), &server)
+    // so `gf pr checks && deploy` no longer deploys.
+    let failed = gf(home.path(), &server)
         .args(["pr", "checks", "12"])
         .output()
         .unwrap();
@@ -447,14 +447,14 @@ async fn pr_checks_exits_like_gh_for_a_person_and_zero_for_json() {
     );
 
     // Still running: exit 8, gh's "pending".
-    let pending = fx(home.path(), &server)
+    let pending = gf(home.path(), &server)
         .args(["pr", "checks", "13"])
         .output()
         .unwrap();
     assert_eq!(code(&pending), 8, "{}", describe(&pending));
 
     // JSON is data, as with gh: exit 0 whatever the checks say.
-    let exported = fx(home.path(), &server)
+    let exported = gf(home.path(), &server)
         .args(["pr", "checks", "12", "--json", "name,bucket,state"])
         .output()
         .unwrap();
@@ -463,7 +463,7 @@ async fn pr_checks_exits_like_gh_for_a_person_and_zero_for_json() {
         stdout_json(&exported)[1],
         json!({ "bucket": "fail", "name": "lint", "state": "FAILURE" })
     );
-    let enveloped = fx(home.path(), &server)
+    let enveloped = gf(home.path(), &server)
         .args(["--agent", "pr", "checks", "12"])
         .output()
         .unwrap();
@@ -482,7 +482,7 @@ async fn dash_h_on_auth_names_the_host_instead_of_printing_help() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let mut cmd = fx(home.path(), &server);
+    let mut cmd = gf(home.path(), &server);
     cmd.env_remove("GITFOX_HOST");
     let output = cmd
         .args(["--agent", "auth", "status", "-h", &server.uri()])
@@ -521,7 +521,7 @@ async fn pr_merge_takes_ghs_strategy_admin_and_commit_flags() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args([
             "--agent",
             "pr",
@@ -562,7 +562,7 @@ async fn a_gh_flag_gitfox_cannot_honour_says_so_instead_of_being_ignored() {
             "whole run",
         ),
     ] {
-        let output = fx(home.path(), &server).args(&args).output().unwrap();
+        let output = gf(home.path(), &server).args(&args).output().unwrap();
         assert_eq!(code(&output), 9, "{args:?}: {}", describe(&output));
         let error = &stdout_json(&output)["error"];
         assert_eq!(error["code"], "UNSUPPORTED", "{args:?}");
@@ -595,7 +595,7 @@ async fn a_pull_request_can_be_named_by_branch_or_by_url() {
         "https://git.example.com/ai/backend/pulls/12",
         "#12",
     ] {
-        let output = fx(home.path(), &server)
+        let output = gf(home.path(), &server)
             .args(["pr", "view", selector, "--json", "number"])
             .output()
             .unwrap();
@@ -634,7 +634,7 @@ async fn pr_close_comments_first_then_closes() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args(["--agent", "pr", "close", "12", "-c", "Superseded by #14"])
         .output()
         .unwrap();
@@ -660,7 +660,7 @@ async fn pr_ready_takes_a_draft_out_of_draft() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args(["--agent", "pr", "ready", "12"])
         .output()
         .unwrap();
@@ -706,7 +706,7 @@ async fn pr_edit_changes_the_title_a_reviewer_and_a_label() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args([
             "--agent",
             "pr",
@@ -746,7 +746,7 @@ async fn pr_review_posts_the_text_then_the_decision_on_the_head_commit() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args(["--agent", "pr", "review", "12", "-r", "-b", "Needs a test."])
         .output()
         .unwrap();
@@ -782,7 +782,7 @@ async fn pr_comment_edit_last_changes_only_your_own_comment() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args([
             "--agent",
             "pr",
@@ -839,7 +839,7 @@ async fn pr_status_falls_back_when_the_reviewer_filter_fails() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args(["pr", "status", "--json", "number"])
         .output()
         .unwrap();
@@ -890,7 +890,7 @@ async fn run_view_finds_the_one_pipeline_with_that_run_number() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args([
             "run",
             "view",
@@ -910,7 +910,7 @@ async fn run_view_finds_the_one_pipeline_with_that_run_number() {
     assert_eq!(data["jobs"][0]["name"], "ship");
 
     // For a person, --exit-status is exit 1 on a failed run, as in gh.
-    let human = fx(home.path(), &server)
+    let human = gf(home.path(), &server)
         .args(["run", "view", "deploy/7", "--exit-status"])
         .output()
         .unwrap();
@@ -936,7 +936,7 @@ async fn run_list_filters_by_ghs_status_words() {
         ("failure", json!([{ "number": 1 }])),
         ("in_progress", json!([{ "number": 3 }])),
     ] {
-        let output = fx(home.path(), &server)
+        let output = gf(home.path(), &server)
             .args(["run", "list", "-s", status, "--json", "number"])
             .output()
             .unwrap();
@@ -961,7 +961,7 @@ async fn workflow_disable_patches_the_pipeline() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args(["--agent", "workflow", "disable", "nightly"])
         .output()
         .unwrap();
@@ -1011,7 +1011,7 @@ async fn secret_set_creates_a_new_secret_and_updates_an_existing_one() {
     let home = TempDir::new().unwrap();
 
     // The value on stdin, as `gh secret set NAME < file` reads it.
-    let created = fx(home.path(), &server)
+    let created = gf(home.path(), &server)
         .args(["--agent", "secret", "set", "NEW_TOKEN", "-o", "ai"])
         .write_stdin("from-stdin\n")
         .output()
@@ -1022,7 +1022,7 @@ async fn secret_set_creates_a_new_secret_and_updates_an_existing_one() {
         "created"
     );
 
-    let updated = fx(home.path(), &server)
+    let updated = gf(home.path(), &server)
         .args(["--agent", "secret", "set", "OLD_TOKEN", "--body", "rotated"])
         .output()
         .unwrap();
@@ -1053,7 +1053,7 @@ async fn label_create_maps_a_hex_colour_onto_gitfoxs_palette() {
     let home = TempDir::new().unwrap();
 
     // GitHub's default `bug` colour.
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args([
             "--agent",
             "label",
@@ -1092,7 +1092,7 @@ async fn ssh_key_add_names_the_key_after_its_title() {
     let key = home.path().join("id_ed25519.pub");
     std::fs::write(&key, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG me@laptop\n").unwrap();
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args([
             "--agent",
             "ssh-key",
@@ -1134,7 +1134,7 @@ async fn repo_create_sends_ghs_options_and_delete_needs_yes_without_a_person() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let created = fx(home.path(), &server)
+    let created = gf(home.path(), &server)
         .args([
             "--agent",
             "repo",
@@ -1154,13 +1154,13 @@ async fn repo_create_sends_ghs_options_and_delete_needs_yes_without_a_person() {
     assert_eq!(code(&created), 0, "{}", describe(&created));
 
     // Nobody to ask: refused before any request, as gh refuses.
-    let refused = fx(home.path(), &server)
+    let refused = gf(home.path(), &server)
         .args(["--agent", "repo", "delete", "ai/old"])
         .output()
         .unwrap();
     assert_eq!(code(&refused), 2, "{}", describe(&refused));
 
-    let deleted = fx(home.path(), &server)
+    let deleted = gf(home.path(), &server)
         .args(["--agent", "repo", "delete", "ai/old", "--yes"])
         .output()
         .unwrap();
@@ -1181,7 +1181,7 @@ async fn repo_read_file_prints_the_bytes_and_nothing_else() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args(["repo", "read-file", "docs/notes.txt", "--ref", "main"])
         .output()
         .unwrap();
@@ -1221,7 +1221,7 @@ async fn repo_clone_passes_git_flags_through() {
         .mount(&server)
         .await;
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args([
             "--agent",
             "repo",
@@ -1256,13 +1256,13 @@ async fn an_alias_expands_with_its_arguments_before_parsing() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let set = fx(home.path(), &server)
+    let set = gf(home.path(), &server)
         .args(["alias", "set", "prs", "pr list --state $1"])
         .output()
         .unwrap();
     assert_eq!(code(&set), 0, "{}", describe(&set));
 
-    let used = fx(home.path(), &server)
+    let used = gf(home.path(), &server)
         .args(["prs", "merged", "--json", "number"])
         .output()
         .unwrap();
@@ -1270,7 +1270,7 @@ async fn an_alias_expands_with_its_arguments_before_parsing() {
     assert_eq!(stdout_json(&used), json!([]));
 
     // A built-in name cannot be taken.
-    let taken = fx(home.path(), &server)
+    let taken = gf(home.path(), &server)
         .args(["alias", "set", "pr", "repo list"])
         .output()
         .unwrap();
@@ -1282,7 +1282,7 @@ async fn config_dash_h_scopes_a_key_to_one_host() {
     let server = MockServer::start().await;
     let home = TempDir::new().unwrap();
 
-    let set = fx(home.path(), &server)
+    let set = gf(home.path(), &server)
         .args([
             "config",
             "set",
@@ -1295,13 +1295,13 @@ async fn config_dash_h_scopes_a_key_to_one_host() {
         .unwrap();
     assert_eq!(code(&set), 0, "{}", describe(&set));
 
-    let scoped = fx(home.path(), &server)
+    let scoped = gf(home.path(), &server)
         .args(["config", "get", "hosts.git.example.com.git_protocol"])
         .output()
         .unwrap();
     assert_eq!(stdout(&scoped).trim(), "ssh");
     // The top-level key is untouched, and reports gh's default.
-    let top = fx(home.path(), &server)
+    let top = gf(home.path(), &server)
         .args(["config", "get", "git_protocol"])
         .output()
         .unwrap();
@@ -1313,14 +1313,14 @@ async fn completion_and_browse_take_ghs_flags() {
     let server = MockServer::start().await;
     let home = TempDir::new().unwrap();
 
-    let completion = fx(home.path(), &server)
+    let completion = gf(home.path(), &server)
         .args(["completion", "-s", "zsh"])
         .output()
         .unwrap();
     assert_eq!(code(&completion), 0, "{}", describe(&completion));
-    assert!(stdout(&completion).starts_with("#compdef fx"));
+    assert!(stdout(&completion).starts_with("#compdef gf"));
 
-    let browse = fx(home.path(), &server)
+    let browse = gf(home.path(), &server)
         .args(["browse", "12", "-n"])
         .output()
         .unwrap();
@@ -1343,7 +1343,7 @@ async fn codespace_explains_that_gitspaces_are_switched_off() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args(["--agent", "codespace", "list"])
         .output()
         .unwrap();
@@ -1354,7 +1354,7 @@ async fn codespace_explains_that_gitspaces_are_switched_off() {
 }
 
 // ---------------------------------------------------------------------------
-// what GitFox lacks, and fx's own commands under gh's names
+// what GitFox lacks, and gf's own commands under gh's names
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1367,7 +1367,7 @@ async fn a_gh_command_for_a_missing_feature_says_why_and_sends_nothing() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let output = fx(home.path(), &server)
+    let output = gf(home.path(), &server)
         .args(["--agent", "issue", "list", "--state", "open"])
         .output()
         .unwrap();
@@ -1385,7 +1385,7 @@ async fn a_gh_command_for_a_missing_feature_says_why_and_sends_nothing() {
         vec!["release", "create", "v1.0.0", "-h", "git.example.com"],
         vec!["gist", "--help"],
     ] {
-        let output = fx(home.path(), &server).args(&args).output().unwrap();
+        let output = gf(home.path(), &server).args(&args).output().unwrap();
         assert_eq!(code(&output), 9, "{args:?}: {}", describe(&output));
         assert!(
             stdout(&output).is_empty(),
@@ -1420,13 +1420,13 @@ async fn pipeline_commands_take_ghs_workflow_and_ref_names() {
         .await;
     let home = TempDir::new().unwrap();
 
-    let list = fx(home.path(), &server)
+    let list = gf(home.path(), &server)
         .args(["--agent", "pipeline", "list", "--workflow", "build"])
         .output()
         .unwrap();
     assert_eq!(code(&list), 0, "{}", describe(&list));
 
-    let run = fx(home.path(), &server)
+    let run = gf(home.path(), &server)
         .args(["--agent", "pipeline", "run", "build", "--ref", "release"])
         .output()
         .unwrap();

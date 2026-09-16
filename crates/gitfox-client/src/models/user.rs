@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 /// The authenticated principal, as reported by `GET /api/v1/user`.
 ///
 /// Every field is optional because self-hosted GitFox instances of different
-/// versions populate slightly different subsets, and `fx auth status` must not
+/// versions populate slightly different subsets, and `gf auth status` must not
 /// fail just because one of them is missing.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct User {

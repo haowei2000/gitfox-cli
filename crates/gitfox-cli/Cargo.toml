@@ -1,6 +1,6 @@
 [package]
 name = "gitfox-cli"
-description = "fx - GitFox CLI for humans, CI and AI agents"
+description = "gf - GitFox CLI for humans, CI and AI agents"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,7 +12,7 @@ keywords = ["gitfox", "cli", "git", "devops", "ci"]
 categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
-name = "fx"
+name = "gf"
 path = "src/main.rs"
 
 [features]

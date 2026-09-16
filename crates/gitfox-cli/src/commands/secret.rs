@@ -1,4 +1,4 @@
-//! `fx secret` — space secrets.
+//! `gf secret` — space secrets.
 //!
 //! GitHub keeps secrets per repository, environment and organisation; GitFox
 //! keeps them per space. So the scope is a space: `-o/--org`, else the current
@@ -262,7 +262,7 @@ const SECRET_FIELDS: &[&str] = &[
     "selectedReposURL",
     "updatedAt",
     "visibility",
-    // fx's own names
+    // gf's own names
     "identifier",
     "description",
     "created",

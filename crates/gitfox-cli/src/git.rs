@@ -1,11 +1,11 @@
 //! What the surrounding git checkout can tell us.
 //!
 //! This is the bottom tier of the configuration chain: it is why `cd project &&
-//! fx pr list` works without a `-R`.
+//! gf pr list` works without a `-R`.
 //!
 //! We shell out to `git` rather than linking libgit2. Everything needed here is
 //! three plumbing commands, `git` is already present for anyone with a GitFox
-//! checkout, and `fx pr checkout` will have to drive the real `git` for its
+//! checkout, and `gf pr checkout` will have to drive the real `git` for its
 //! credentials anyway.
 
 use std::path::Path;
@@ -21,12 +21,15 @@ pub struct GitInfo {
     pub remotes: Vec<Remote>,
     /// The checked-out branch, absent when HEAD is detached.
     pub branch: Option<String>,
-    /// `fx repo set-default`'s choice for this checkout.
+    /// `gf repo set-default`'s choice for this checkout.
     pub default_repo: Option<String>,
 }
 
-/// The git config key `fx repo set-default` writes, local to the checkout.
-pub const DEFAULT_REPO_KEY: &str = "fx.repo";
+/// The git config key `gf repo set-default` writes, local to the checkout.
+pub const DEFAULT_REPO_KEY: &str = "gf.repo";
+/// The key the `fx` binary wrote up to 0.6. Still read, and still cleared by
+/// `--unset`, so a checkout set up before the rename keeps its default.
+pub const LEGACY_DEFAULT_REPO_KEY: &str = "fx.repo";
 
 impl GitInfo {
     pub fn to_context(&self) -> GitContext {
@@ -46,7 +49,8 @@ pub fn detect() -> GitInfo {
     GitInfo {
         remotes: remotes(),
         branch: current_branch(),
-        default_repo: run(&["config", "--local", "--get", DEFAULT_REPO_KEY]),
+        default_repo: run(&["config", "--local", "--get", DEFAULT_REPO_KEY])
+            .or_else(|| run(&["config", "--local", "--get", LEGACY_DEFAULT_REPO_KEY])),
     }
 }
 
@@ -185,7 +189,7 @@ pub fn fill_from_commits(commits: &[Commit]) -> Option<(String, String)> {
 /// name the directory after whatever the URL happens to end with, which is only
 /// incidentally the repository's name — the caller knows the real one.
 ///
-/// The URL is passed through untouched. fx never splices a token into it: that
+/// The URL is passed through untouched. gf never splices a token into it: that
 /// would write the credential into `.git/config`, where it outlives the command
 /// and travels with the checkout.
 pub fn clone(url: &str, destination: &Path, extra: &[String]) -> Result<(), String> {

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// `declined`, `error`, `failure`, `killed`, `pending`, `running`, `skipped`,
 /// `success` and `waiting_on_dependencies`, but a CI system grows states over
 /// time; a closed enum would either lose the server's exact word or fail to
-/// decode. Everything `fx` needs is classification, and that is what the
+/// decode. Everything `gf` needs is classification, and that is what the
 /// predicates below provide.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(transparent)]
@@ -20,7 +20,7 @@ impl CiStatus {
     /// Something went wrong and there is likely a log worth reading.
     ///
     /// `declined` and `skipped` are excluded on purpose: they never ran, so
-    /// `fx pipeline logs --failed` would only show empty output for them.
+    /// `gf pipeline logs --failed` would only show empty output for them.
     pub fn is_failed(&self) -> bool {
         matches!(self.0.as_str(), "failure" | "error" | "killed")
     }
@@ -100,7 +100,7 @@ pub struct Stage {
 /// One run of a pipeline.
 ///
 /// `stages` is populated by the single-execution endpoint and empty in list
-/// responses, which is why `fx pipeline logs` fetches the execution before it
+/// responses, which is why `gf pipeline logs` fetches the execution before it
 /// can find anything to fetch logs for.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Execution {

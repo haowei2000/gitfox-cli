@@ -1,4 +1,4 @@
-//! `fx ssh-key` — the SSH keys on your GitFox account.
+//! `gf ssh-key` — the SSH keys on your GitFox account.
 
 use gitfox_client::PublicKey;
 use serde_json::{Value, json};

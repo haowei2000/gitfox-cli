@@ -1,4 +1,4 @@
-//! `fx browse` — open the GitFox web UI at the right page.
+//! `gf browse` — open the GitFox web UI at the right page.
 //!
 //! The routes are the UI's own (`/{repo}/pulls/{n}`, `/{repo}/files/{ref}/~/…`,
 //! `/{repo}/pipelines`), read from the GitFox web bundle rather than guessed.

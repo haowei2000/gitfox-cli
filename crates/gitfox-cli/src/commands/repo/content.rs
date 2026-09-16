@@ -24,7 +24,7 @@ pub async fn read_file(args: RepoReadFileArgs, ctx: &Context) -> Result<()> {
     if content.is_dir() {
         return Err(
             CliError::invalid_argument(format!("`{}` is a directory", args.path))
-                .with_hint("use `fx repo read-dir` to list it"),
+                .with_hint("use `gf repo read-dir` to list it"),
         );
     }
     let bytes = content.bytes().ok_or_else(|| {
@@ -216,7 +216,7 @@ pub async fn read_dir(args: RepoReadDirArgs, ctx: &Context) -> Result<()> {
     if !content.is_dir() {
         return Err(
             CliError::invalid_argument(format!("`{path}` is not a directory"))
-                .with_hint("use `fx repo read-file` to print it"),
+                .with_hint("use `gf repo read-file` to print it"),
         );
     }
     ctx.renderer.emit(&DirListing {
@@ -344,14 +344,14 @@ pub async fn gitignore(cmd: RepoGitignoreCommand, ctx: &Context) -> Result<()> {
                     ErrorCode::NotFound,
                     format!("no gitignore template `{}`", view.name),
                 )
-                .with_hint("see `fx repo gitignore list`"));
+                .with_hint("see `gf repo gitignore list`"));
             }
             Err(CliError::unsupported(
                 "viewing a gitignore template",
                 "GitFox lists its templates but does not serve their contents",
             )
             .with_hint(format!(
-                "`fx repo create NAME --gitignore {}` applies it to a new repository",
+                "`gf repo create NAME --gitignore {}` applies it to a new repository",
                 view.name
             )))
         }
@@ -376,7 +376,7 @@ pub async fn license(cmd: RepoLicenseCommand, ctx: &Context) -> Result<()> {
                 .find(|l| l.value.eq_ignore_ascii_case(&view.name))
                 .ok_or_else(|| {
                     CliError::new(ErrorCode::NotFound, format!("no license `{}`", view.name))
-                        .with_hint("see `fx repo license list`")
+                        .with_hint("see `gf repo license list`")
                 })?;
             if view.web {
                 return interact::open_in_browser(
@@ -389,7 +389,7 @@ pub async fn license(cmd: RepoLicenseCommand, ctx: &Context) -> Result<()> {
                 "GitFox lists its licenses but does not serve their text",
             )
             .with_hint(format!(
-                "`fx repo license view {} --web`, or `fx repo create NAME --license {}`",
+                "`gf repo license view {} --web`, or `gf repo create NAME --license {}`",
                 found.value, found.value
             )))
         }

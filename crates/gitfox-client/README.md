@@ -4,7 +4,7 @@ A Rust client for the [GitFox](https://github.com/harness/gitness) API.
 
 This crate knows about HTTP and about GitFox. It knows nothing about terminals,
 tables, exit codes or configuration files — that separation is what lets
-[`fx`](https://crates.io/crates/gitfox-cli), and later an MCP server, share one
+[`gf`](https://crates.io/crates/gitfox-cli), and later an MCP server, share one
 implementation instead of shelling out to a binary.
 
 ```rust,no_run

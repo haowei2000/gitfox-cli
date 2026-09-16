@@ -1,4 +1,4 @@
-//! `fx pipeline`, and gh's `fx run` / `fx workflow` over the same runs.
+//! `gf pipeline`, and gh's `gf run` / `gf workflow` over the same runs.
 
 use clap::{Args, Subcommand};
 
@@ -28,15 +28,15 @@ Print the logs of a pipeline run.
 Logs are addressed per step, so this walks the run and fetches the steps you
 asked for. Inside a checkout with a single pipeline, none of it needs naming:
 
-  fx pipeline logs --failed      the failed steps of the most recent run
-  fx pipeline logs 182 --failed  the failed steps of run 182
-  fx pipeline logs --step test   steps whose name contains \"test\"
+  gf pipeline logs --failed      the failed steps of the most recent run
+  gf pipeline logs 182 --failed  the failed steps of run 182
+  gf pipeline logs --step test   steps whose name contains \"test\"
 
 A failed build's log is mostly progress output, and the reason it failed is at
 the end. --tail keeps that end; the response says how many lines there were in
 total, so nothing is dropped silently:
 
-  fx --agent pipeline logs --failed --tail 50")]
+  gf --agent pipeline logs --failed --tail 50")]
     Logs(PipelineLogsArgs),
     /// Trigger a pipeline run
     Run(PipelineRunArgs),

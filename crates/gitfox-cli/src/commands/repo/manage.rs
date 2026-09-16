@@ -56,7 +56,7 @@ pub async fn create(args: RepoCreateArgs, ctx: &Context) -> Result<()> {
         Some(name) => name,
         None => {
             ctx.require_interactive("a repository name")
-                .map_err(|e| e.with_hint("pass the name, e.g. `fx repo create space/name`"))?;
+                .map_err(|e| e.with_hint("pass the name, e.g. `gf repo create space/name`"))?;
             dialoguer::Input::<String>::new()
                 .with_prompt("Repository name")
                 .interact_text()
@@ -264,7 +264,7 @@ pub async fn rename(args: RepoRenameArgs, ctx: &Context) -> Result<()> {
     let new_name = new_name.trim().to_string();
     if new_name.contains('/') {
         return Err(CliError::invalid_argument(
-            "the new name is a name, not a path; `fx repo rename` keeps the repository in its space",
+            "the new name is a name, not a path; `gf repo rename` keeps the repository in its space",
         ));
     }
     if !args.yes && !ctx.config.non_interactive {
@@ -500,13 +500,15 @@ pub async fn set_default(args: RepoSetDefaultArgs, ctx: &Context) -> Result<()> 
             }),
             None => Err(CliError::new(
                 ErrorCode::NotFound,
-                "no default repository has been set; use `fx repo set-default` to add one",
+                "no default repository has been set; use `gf repo set-default` to add one",
             )),
         };
     }
     if args.unset {
-        git::unset_local_config(git::DEFAULT_REPO_KEY)
-            .map_err(|m| CliError::new(ErrorCode::GitContextError, m))?;
+        for key in [git::DEFAULT_REPO_KEY, git::LEGACY_DEFAULT_REPO_KEY] {
+            git::unset_local_config(key)
+                .map_err(|m| CliError::new(ErrorCode::GitContextError, m))?;
+        }
         return ctx.renderer.emit(&DefaultRepo {
             repo: None,
             changed: true,
@@ -532,6 +534,10 @@ pub async fn set_default(args: RepoSetDefaultArgs, ctx: &Context) -> Result<()> 
     let client = ctx.client()?;
     fetch(&client, &repo).await?;
     git::set_local_config(git::DEFAULT_REPO_KEY, &repo.full())
+        .map_err(|m| CliError::new(ErrorCode::GitContextError, m))?;
+    // Nothing reads the pre-0.7 key once this one is set; leaving it would only
+    // strand a stale repository in the checkout's git config.
+    git::unset_local_config(git::LEGACY_DEFAULT_REPO_KEY)
         .map_err(|m| CliError::new(ErrorCode::GitContextError, m))?;
     ctx.renderer.emit(&DefaultRepo {
         repo: Some(repo.full()),

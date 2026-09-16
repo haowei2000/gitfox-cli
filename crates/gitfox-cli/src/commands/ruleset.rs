@@ -1,4 +1,4 @@
-//! `fx ruleset` — a repository's protection rules, GitFox's counterpart to
+//! `gf ruleset` — a repository's protection rules, GitFox's counterpart to
 //! GitHub rulesets.
 
 use gitfox_client::Rule;
@@ -17,7 +17,7 @@ pub async fn run(cmd: RulesetCommand, ctx: &Context) -> Result<()> {
         RulesetSubcommand::View(args) => view(args, ctx).await,
         RulesetSubcommand::Check(_) => super::gh_only::refuse(
             "ruleset check",
-            "GitFox does not report which rules apply to a branch; see `fx ruleset list`",
+            "GitFox does not report which rules apply to a branch; see `gf ruleset list`",
         ),
     }
 }

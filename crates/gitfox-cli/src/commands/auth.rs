@@ -1,8 +1,8 @@
-//! `fx auth` — login, logout, status, token, switch, setup-git.
+//! `gf auth` — login, logout, status, token, switch, setup-git.
 //!
 //! Tokens are stored in the OS keychain and never written to the config file
 //! or logged. Two commands print one, because that is their whole purpose and
-//! gh's equivalents do the same: `fx auth token`, and `fx auth status
+//! gh's equivalents do the same: `gf auth token`, and `gf auth status
 //! --show-token`. Nothing else ever does.
 
 use std::io::{BufRead, Read};
@@ -32,7 +32,7 @@ pub async fn run(cmd: AuthCommand, ctx: &Context) -> Result<()> {
         AuthSubcommand::GitCredential(args) => git_credential(args, ctx),
         AuthSubcommand::Refresh(_) => super::gh_only::refuse(
             "auth refresh",
-            "a GitFox token's permissions are fixed when it is created; create a new token and `fx auth login --with-token`",
+            "a GitFox token's permissions are fixed when it is created; create a new token and `gf auth login --with-token`",
         ),
     }
 }
@@ -43,7 +43,7 @@ async fn login(args: AuthLoginArgs, ctx: &Context) -> Result<()> {
             "`--web`",
             "GitFox logs in with an access token, not a browser flow",
         )
-        .with_hint("create a token in GitFox, then `fx auth login --with-token < token.txt`"));
+        .with_hint("create a token in GitFox, then `gf auth login --with-token < token.txt`"));
     }
     if !args.scopes.is_empty() {
         return Err(CliError::unsupported(
@@ -60,7 +60,7 @@ async fn login(args: AuthLoginArgs, ctx: &Context) -> Result<()> {
     if args.insecure_storage {
         return Err(CliError::unsupported(
             "`--insecure-storage`",
-            "fx never writes a token to a plain-text file",
+            "gf never writes a token to a plain-text file",
         )
         .with_hint("export GITFOX_TOKEN where no keychain is available"));
     }
@@ -185,7 +185,7 @@ async fn logout(args: AuthLogoutArgs, ctx: &Context) -> Result<()> {
     let host_key = host_key_of(&host)
         .ok_or_else(|| CliError::config(format!("could not derive a hostname from `{host}`")))?;
 
-    // `-u` guards against logging out the wrong account: fx keeps one per
+    // `-u` guards against logging out the wrong account: gf keeps one per
     // host, so the only question is whether it is that user's.
     if let Some(wanted) = args.user.as_deref() {
         let stored = ctx
@@ -231,7 +231,7 @@ async fn status(args: AuthStatusArgs, ctx: &Context) -> Result<()> {
             ErrorCode::AuthRequired,
             format!("not logged in to {host_key}"),
         )
-        .with_hint("run `fx auth login`, or set GITFOX_TOKEN"));
+        .with_hint("run `gf auth login`, or set GITFOX_TOKEN"));
     };
 
     let client = ctx.client_for(&host, Some(&token))?;
@@ -274,7 +274,7 @@ async fn token(args: AuthTokenArgs, ctx: &Context) -> Result<()> {
             ErrorCode::AuthRequired,
             format!("no oauth token found for {host_key}"),
         )
-        .with_hint("run `fx auth login`, or set GITFOX_TOKEN")
+        .with_hint("run `gf auth login`, or set GITFOX_TOKEN")
     })?;
 
     if let Some(wanted) = args.user.as_deref() {
@@ -317,7 +317,7 @@ fn switch(args: AuthSwitchArgs, ctx: &Context) -> Result<()> {
                         ErrorCode::NotFound,
                         "there is no other host to switch to",
                     )
-                    .with_hint("log in to another with `fx auth login --hostname …`"));
+                    .with_hint("log in to another with `gf auth login --hostname …`"));
                 }
                 many => {
                     return Err(CliError::invalid_argument(format!(
@@ -341,7 +341,7 @@ fn switch(args: AuthSwitchArgs, ctx: &Context) -> Result<()> {
             ErrorCode::AuthRequired,
             format!("not logged in to {target}"),
         )
-        .with_hint(format!("run `fx auth login --hostname {target}` first")));
+        .with_hint(format!("run `gf auth login --hostname {target}` first")));
     }
 
     let previous = file.default_host.replace(target.clone());
@@ -362,7 +362,7 @@ fn setup_git(args: AuthSetupGitArgs, ctx: &Context) -> Result<()> {
                     ErrorCode::AuthRequired,
                     format!("you are not logged in to {key}"),
                 )
-                .with_hint("run `fx auth login` first, or pass --force"));
+                .with_hint("run `gf auth login` first, or pass --force"));
             }
             vec![(host.to_string(), api_url)]
         }
@@ -383,11 +383,11 @@ fn setup_git(args: AuthSetupGitArgs, ctx: &Context) -> Result<()> {
             ErrorCode::AuthRequired,
             "you are not logged in to any GitFox hosts",
         )
-        .with_hint("run `fx auth login` first"));
+        .with_hint("run `gf auth login` first"));
     }
 
     let exe = std::env::current_exe()
-        .map_err(|e| CliError::config(format!("could not find the fx binary: {e}")))?;
+        .map_err(|e| CliError::config(format!("could not find the gf binary: {e}")))?;
     let helper = format!(
         "!{} auth git-credential",
         shell_quote(&exe.display().to_string())
@@ -406,13 +406,13 @@ fn setup_git(args: AuthSetupGitArgs, ctx: &Context) -> Result<()> {
 }
 
 /// The git credential protocol: read `key=value` lines, answer `get` with a
-/// username and password for a host fx has a token for.
+/// username and password for a host gf has a token for.
 ///
 /// git calls this, not a person, so it prints nothing it was not asked for —
 /// an unknown host is simply no answer, which makes git try its next helper.
 fn git_credential(args: AuthGitCredentialArgs, ctx: &Context) -> Result<()> {
     if args.operation != "get" {
-        // `store` and `erase`: fx owns its tokens, git does not get to change
+        // `store` and `erase`: gf owns its tokens, git does not get to change
         // them.
         return Ok(());
     }
@@ -444,7 +444,7 @@ fn git_credential(args: AuthGitCredentialArgs, ctx: &Context) -> Result<()> {
         .hosts
         .get(&host_key)
         .and_then(|h| h.user.clone())
-        .unwrap_or_else(|| "fx".to_string());
+        .unwrap_or_else(|| "gf".to_string());
     ctx.renderer.write_str(&format!(
         "protocol={protocol}\nhost={host}\nusername={username}\npassword={}\n",
         token.expose()
@@ -523,7 +523,7 @@ impl Render for LogoutResult {
 struct StatusResult {
     host: String,
     host_key: String,
-    /// The login, which is what gh's `login` and fx's filters take.
+    /// The login, which is what gh's `login` and gf's filters take.
     user: String,
     display_name: String,
     token_source: TokenSource,
@@ -617,7 +617,7 @@ impl Render for TokenResult {
     }
 
     fn to_human(&self, _color: bool) -> String {
-        // Bare, so `$(fx auth token)` is the token and nothing else.
+        // Bare, so `$(gf auth token)` is the token and nothing else.
         self.token.clone()
     }
 }
@@ -662,7 +662,7 @@ impl Render for SetupGitResult {
         };
         self.configured
             .iter()
-            .map(|origin| format!("{green}✓{reset} git uses fx for credentials on {origin}"))
+            .map(|origin| format!("{green}✓{reset} git uses gf for credentials on {origin}"))
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -735,7 +735,7 @@ mod tests {
         assert_eq!(parse_git_protocol("SSH").unwrap(), "ssh");
         assert_eq!(parse_git_protocol("https").unwrap(), "https");
         assert!(parse_git_protocol("ftp").is_err());
-        assert_eq!(shell_quote("/usr/local/bin/fx"), "/usr/local/bin/fx");
-        assert_eq!(shell_quote("/Users/a b/fx"), "'/Users/a b/fx'");
+        assert_eq!(shell_quote("/usr/local/bin/gf"), "/usr/local/bin/gf");
+        assert_eq!(shell_quote("/Users/a b/gf"), "'/Users/a b/gf'");
     }
 }

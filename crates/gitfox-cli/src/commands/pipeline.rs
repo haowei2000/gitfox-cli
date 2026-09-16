@@ -1,6 +1,6 @@
-//! `fx pipeline` — runs, and the logs that explain them.
+//! `gf pipeline` — runs, and the logs that explain them.
 //!
-//! The command this module exists for is `fx pipeline logs --failed`. GitFox
+//! The command this module exists for is `gf pipeline logs --failed`. GitFox
 //! addresses logs per step, and only the single-execution endpoint returns the
 //! stage tree, so answering "why is CI red" by hand means reading the run,
 //! finding the steps that failed, and fetching each one. That is several
@@ -91,7 +91,7 @@ pub(crate) async fn resolve_run(
             ErrorCode::PipelineNotFound,
             format!("pipeline `{pipeline}` has never run"),
         )
-        .with_hint("start one with `fx pipeline run`")
+        .with_hint("start one with `gf pipeline run`")
     })
 }
 
@@ -211,7 +211,7 @@ async fn view(args: PipelineViewArgs, ctx: &Context) -> Result<()> {
         execution,
     })?;
 
-    // As `fx run view --exit-status`: for a person only, since JSON already
+    // As `gf run view --exit-status`: for a person only, since JSON already
     // carried the result.
     if args.exit_status && failed && !ctx.renderer.is_machine() {
         return Err(

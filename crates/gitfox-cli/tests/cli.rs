@@ -13,10 +13,10 @@ use tempfile::TempDir;
 use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-/// A `fx` invocation isolated from the developer's real environment: its own
+/// A `gf` invocation isolated from the developer's real environment: its own
 /// config file, no ambient GITFOX_* variables, no colour.
-fn fx(home: &Path) -> Command {
-    let mut cmd = Command::cargo_bin("fx").expect("the fx binary should build");
+fn gf(home: &Path) -> Command {
+    let mut cmd = Command::cargo_bin("gf").expect("the gf binary should build");
     for key in [
         "GITFOX_HOST",
         "GITFOX_TOKEN",
@@ -57,7 +57,7 @@ fn code(output: &Output) -> i32 {
 #[test]
 fn help_and_version_succeed() {
     let home = TempDir::new().unwrap();
-    let help = fx(home.path()).arg("--help").output().unwrap();
+    let help = gf(home.path()).arg("--help").output().unwrap();
     assert_eq!(code(&help), 0);
     let text = String::from_utf8_lossy(&help.stdout);
     for expected in ["auth", "api", "repo", "pr", "pipeline", "config", "--agent"] {
@@ -67,7 +67,7 @@ fn help_and_version_succeed() {
         );
     }
 
-    let version = fx(home.path()).arg("--version").output().unwrap();
+    let version = gf(home.path()).arg("--version").output().unwrap();
     assert_eq!(code(&version), 0);
     assert!(String::from_utf8_lossy(&version.stdout).contains(env!("CARGO_PKG_VERSION")));
 }
@@ -75,7 +75,7 @@ fn help_and_version_succeed() {
 #[test]
 fn an_unknown_command_exits_with_the_invalid_argument_code() {
     let home = TempDir::new().unwrap();
-    let output = fx(home.path()).arg("nonsense").output().unwrap();
+    let output = gf(home.path()).arg("nonsense").output().unwrap();
     assert_eq!(code(&output), 2);
 }
 
@@ -86,7 +86,7 @@ fn an_unknown_command_exits_with_the_invalid_argument_code() {
 #[test]
 fn a_missing_host_is_a_config_error_with_the_documented_envelope() {
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .args(["--json", "api", "GET", "/api/v1/user"])
         .output()
         .unwrap();
@@ -102,7 +102,7 @@ fn a_missing_host_is_a_config_error_with_the_documented_envelope() {
 #[test]
 fn the_same_failure_stays_on_stderr_for_humans() {
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .args(["api", "GET", "/api/v1/user"])
         .output()
         .unwrap();
@@ -118,7 +118,7 @@ fn the_same_failure_stays_on_stderr_for_humans() {
 #[test]
 fn an_unparseable_environment_variable_is_reported_not_ignored() {
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_TIMEOUT", "soon")
         .args(["--json", "api", "GET", "/x"])
         .output()
@@ -145,7 +145,7 @@ fn every_command_in_the_surface_is_wired_up() {
         vec!["--agent", "pipeline", "list"],
         vec!["--agent", "pipeline", "logs"],
     ] {
-        let output = fx(home.path())
+        let output = gf(home.path())
             .env("GITFOX_HOST", "https://git.example.com")
             .env("GITFOX_TOKEN", "t")
             .env("GITFOX_REPO", "ai/backend")
@@ -163,11 +163,11 @@ fn every_command_in_the_surface_is_wired_up() {
 fn completion_scripts_are_generated_for_the_usual_shells() {
     let home = TempDir::new().unwrap();
     for (shell, marker) in [
-        ("zsh", "#compdef fx"),
-        ("bash", "_fx"),
+        ("zsh", "#compdef gf"),
+        ("bash", "_gf"),
         ("fish", "complete"),
     ] {
-        let output = fx(home.path())
+        let output = gf(home.path())
             .args(["completion", shell])
             .output()
             .unwrap();
@@ -186,7 +186,7 @@ fn completion_scripts_are_generated_for_the_usual_shells() {
 }
 
 // ---------------------------------------------------------------------------
-// fx api against a mock GitFox
+// gf api against a mock GitFox
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
@@ -199,7 +199,7 @@ async fn api_get_returns_the_success_envelope() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "test-token")
         .args(["--json", "api", "GET", "/api/v1/user"])
@@ -226,7 +226,7 @@ async fn agent_mode_needs_no_json_flag_and_prints_no_colour() {
         vec!["--agent", "api", "/api/v1/user"],
         vec!["api", "/api/v1/user"],
     ] {
-        let output = fx(home.path())
+        let output = gf(home.path())
             .env("GITFOX_HOST", server.uri())
             .env("GITFOX_TOKEN", "test-token")
             // The second run gets agent mode from the environment instead.
@@ -259,7 +259,7 @@ async fn a_bare_path_defaults_to_get_and_fields_imply_post() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let get = fx(home.path())
+    let get = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .args(["--json", "api", "/api/v1/user"])
@@ -267,7 +267,7 @@ async fn a_bare_path_defaults_to_get_and_fields_imply_post() {
         .unwrap();
     assert_eq!(stdout_json(&get)["data"]["via"], "get");
 
-    let post = fx(home.path())
+    let post = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .args(["--json", "api", "/api/v1/foo", "--field", "name=test"])
@@ -292,7 +292,7 @@ async fn http_failures_map_onto_the_documented_exit_codes() {
             .await;
 
         let home = TempDir::new().unwrap();
-        let output = fx(home.path())
+        let output = gf(home.path())
             .env("GITFOX_HOST", server.uri())
             .env("GITFOX_TOKEN", "test-token")
             .args(["--json", "api", "GET", &format!("/api/v1/{endpoint}")])
@@ -312,7 +312,7 @@ fn a_bad_method_or_body_fails_before_any_request_is_made() {
         vec!["--json", "api", "GET"],
         vec!["--json", "api", "POST", "/x", "--body", "{not json"],
     ] {
-        let output = fx(home.path())
+        let output = gf(home.path())
             .env("GITFOX_HOST", "https://git.example.com")
             .env("GITFOX_TOKEN", "t")
             .args(&args)
@@ -337,7 +337,7 @@ async fn jsonl_streams_one_line_per_element() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .args(["--output", "jsonl", "api", "/api/v1/repos"])
@@ -373,7 +373,7 @@ async fn a_redirected_write_is_an_error_not_a_success_that_changed_nothing() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .args([
@@ -416,8 +416,8 @@ async fn the_token_never_appears_in_any_output_stream() {
         .await;
 
     let home = TempDir::new().unwrap();
-    // -vvv is the loudest fx gets, and the mode most likely to leak.
-    let output = fx(home.path())
+    // -vvv is the loudest gf gets, and the mode most likely to leak.
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", TOKEN)
         .args(["-vvv", "--json", "api", "GET", "/api/v1/user"])
@@ -446,7 +446,7 @@ async fn auth_status_reports_the_token_without_printing_it() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", TOKEN)
         .args(["--json", "auth", "status"])
@@ -464,12 +464,12 @@ async fn auth_status_reports_the_token_without_printing_it() {
 #[test]
 fn auth_status_without_a_token_exits_with_the_auth_code() {
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", "https://git.example.com")
         .args(["--json", "auth", "status"])
         .output()
         .unwrap();
-    // 3 = auth error. 7 would mean fx could not even work out which host to ask.
+    // 3 = auth error. 7 would mean gf could not even work out which host to ask.
     assert_eq!(
         code(&output),
         3,
@@ -480,20 +480,20 @@ fn auth_status_without_a_token_exits_with_the_auth_code() {
 }
 
 // ---------------------------------------------------------------------------
-// fx config
+// gf config
 // ---------------------------------------------------------------------------
 
 #[test]
 fn config_set_then_get_round_trips_through_the_file() {
     let home = TempDir::new().unwrap();
-    let set = fx(home.path())
+    let set = gf(home.path())
         .args(["config", "set", "default_host", "git.example.com"])
         .output()
         .unwrap();
     assert_eq!(code(&set), 0);
     assert!(home.path().join("config.toml").exists());
 
-    let get = fx(home.path())
+    let get = gf(home.path())
         .args(["config", "get", "default_host"])
         .output()
         .unwrap();
@@ -504,7 +504,7 @@ fn config_set_then_get_round_trips_through_the_file() {
     );
 
     // With a default host in the file, the host now resolves without any flag.
-    let list = fx(home.path())
+    let list = gf(home.path())
         .args(["--json", "config", "list"])
         .output()
         .unwrap();
@@ -517,7 +517,7 @@ fn config_set_then_get_round_trips_through_the_file() {
 #[test]
 fn config_rejects_anything_token_shaped() {
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .args([
             "--json",
             "config",
@@ -534,7 +534,7 @@ fn config_rejects_anything_token_shaped() {
 #[test]
 fn a_missing_config_key_exits_with_the_not_found_code() {
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .args(["--json", "config", "get", "default_host"])
         .output()
         .unwrap();
@@ -543,7 +543,7 @@ fn a_missing_config_key_exits_with_the_not_found_code() {
 }
 
 // ---------------------------------------------------------------------------
-// fx pr
+// gf pr
 // ---------------------------------------------------------------------------
 
 /// One open pull request, as GitFox would return it.
@@ -564,7 +564,7 @@ fn sample_pr(number: u64) -> Value {
     })
 }
 
-/// The repo-scoped path, with `ai/backend` encoded as one segment. If fx ever
+/// The repo-scoped path, with `ai/backend` encoded as one segment. If gf ever
 /// stopped encoding the slash, none of these mocks would match.
 const PR_PATH: &str = "/api/v1/repos/ai%2Fbackend/pullreq";
 
@@ -579,7 +579,7 @@ async fn pr_list_renders_a_table_for_humans_and_a_list_for_machines() {
 
     let home = TempDir::new().unwrap();
     let base = || {
-        let mut c = fx(home.path());
+        let mut c = gf(home.path());
         c.env("GITFOX_HOST", server.uri())
             .env("GITFOX_TOKEN", "t")
             .env("GITFOX_REPO", "ai/backend");
@@ -625,7 +625,7 @@ async fn pr_list_state_filter_reaches_the_server() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -656,7 +656,7 @@ async fn pr_list_resolves_an_author_login_to_a_numeric_filter() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -687,7 +687,7 @@ async fn pr_view_by_number_and_a_missing_one() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let found = fx(home.path())
+    let found = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -697,7 +697,7 @@ async fn pr_view_by_number_and_a_missing_one() {
     assert_eq!(code(&found), 0);
     assert_eq!(stdout_json(&found)["data"]["title"], "feat: add OAuth");
 
-    let missing = fx(home.path())
+    let missing = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -726,7 +726,7 @@ async fn pr_create_sends_the_branches_and_returns_the_new_pull_request() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -777,7 +777,7 @@ async fn pr_create_takes_its_base_from_the_repository_default_branch() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -795,7 +795,7 @@ async fn pr_create_takes_its_base_from_the_repository_default_branch() {
 #[test]
 fn pr_create_without_a_title_fails_instead_of_prompting_a_machine() {
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", "https://git.example.com")
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -824,11 +824,11 @@ async fn pr_merge_dry_run_reports_mergeability_without_merging() {
         .await;
 
     let home = TempDir::new().unwrap();
-    // gh's spelling and fx's own name for the same strategy.
+    // gh's spelling and gf's own name for the same strategy.
     for strategy in [vec!["--squash"], vec!["--method", "squash"]] {
         let mut args = vec!["--agent", "pr", "merge", "12", "--dry-run"];
         args.extend(strategy.iter().copied());
-        let output = fx(home.path())
+        let output = gf(home.path())
             .env("GITFOX_HOST", server.uri())
             .env("GITFOX_TOKEN", "t")
             .env("GITFOX_REPO", "ai/backend")
@@ -846,9 +846,9 @@ async fn pr_merge_dry_run_reports_mergeability_without_merging() {
         assert_eq!(data["mergeable"], true);
     }
 
-    // `-m squash` was fx 0.6's spelling; `-m` is gh's --merge now, and the
+    // `-m squash` was gf 0.6's spelling; `-m` is gh's --merge now, and the
     // old form says so instead of looking for a branch called `squash`.
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -889,7 +889,7 @@ async fn pr_merge_deletes_the_source_branch_with_a_second_request() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -951,7 +951,7 @@ async fn inside_a_checkout_the_repository_and_host_come_from_the_remote() {
     );
 
     // No -R, no GITFOX_REPO, no GITFOX_HOST: everything comes from the remote.
-    let mut cmd = fx(home.path());
+    let mut cmd = gf(home.path());
     cmd.current_dir(&repo)
         .env("GITFOX_TOKEN", "t")
         .args(["--agent", "pr", "list"]);
@@ -990,7 +990,7 @@ async fn with_no_number_the_current_branch_selects_the_pull_request() {
         ],
     );
 
-    let mut cmd = fx(home.path());
+    let mut cmd = gf(home.path());
     cmd.current_dir(&repo)
         .env("GITFOX_TOKEN", "t")
         .args(["--agent", "pr", "view"]);
@@ -1008,7 +1008,7 @@ async fn with_no_number_the_current_branch_selects_the_pull_request() {
 #[test]
 fn outside_a_checkout_a_repo_scoped_command_says_what_is_missing() {
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", "https://git.example.com")
         .env("GITFOX_TOKEN", "t")
         .args(["--agent", "pr", "list"])
@@ -1022,7 +1022,7 @@ fn outside_a_checkout_a_repo_scoped_command_says_what_is_missing() {
 #[test]
 fn a_malformed_repository_reference_is_an_argument_error() {
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", "https://git.example.com")
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "backend")
@@ -1044,7 +1044,7 @@ async fn a_404_on_the_repository_path_names_the_repository_not_a_pull_request() 
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -1062,7 +1062,7 @@ async fn a_404_on_the_repository_path_names_the_repository_not_a_pull_request() 
 }
 
 // ---------------------------------------------------------------------------
-// fx pipeline
+// gf pipeline
 // ---------------------------------------------------------------------------
 
 const PIPE_PATH: &str = "/api/v1/repos/ai%2Fbackend/pipelines";
@@ -1089,7 +1089,7 @@ fn failing_execution() -> Value {
 }
 
 fn pipeline_env(home: &Path, uri: &str) -> Command {
-    let mut cmd = fx(home);
+    let mut cmd = gf(home);
     cmd.env("GITFOX_HOST", uri)
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend");
@@ -1414,7 +1414,7 @@ async fn a_step_whose_log_is_not_ready_yet_does_not_fail_the_command() {
 }
 
 // ---------------------------------------------------------------------------
-// fx repo
+// gf repo
 // ---------------------------------------------------------------------------
 
 fn repo_json(name: &str, is_public: Option<bool>) -> Value {
@@ -1448,7 +1448,7 @@ async fn repo_list_without_a_space_spans_the_instance() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let human = fx(home.path())
+    let human = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .args(["repo", "list"])
@@ -1465,7 +1465,7 @@ async fn repo_list_without_a_space_spans_the_instance() {
     // No visibility to show, so no column of dashes.
     assert!(!text.contains("VISIBILITY"), "{text}");
 
-    let machine = fx(home.path())
+    let machine = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .args(["--agent", "repo", "list"])
@@ -1490,7 +1490,7 @@ async fn repo_list_in_a_space_reports_visibility() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let human = fx(home.path())
+    let human = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .args(["repo", "list", "ai"])
@@ -1502,7 +1502,7 @@ async fn repo_list_in_a_space_reports_visibility() {
     assert!(text.contains("private"), "{text}");
     assert!(text.contains("public"), "{text}");
 
-    let machine = fx(home.path())
+    let machine = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .args(["--agent", "repo", "list", "ai"])
@@ -1528,7 +1528,7 @@ async fn repo_list_narrows_to_the_space_of_the_current_repository() {
 
     let home = TempDir::new().unwrap();
     // GITFOX_REPO says ai/backend, so a bare `repo list` means "this space".
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -1559,7 +1559,7 @@ async fn repo_view_uses_the_current_repository_and_reports_a_missing_one() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let found = fx(home.path())
+    let found = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -1575,7 +1575,7 @@ async fn repo_view_uses_the_current_repository_and_reports_a_missing_one() {
     assert_eq!(stdout_json(&found)["data"]["repository"], "ai/backend");
     assert_eq!(stdout_json(&found)["data"]["default_branch"], "main");
 
-    let missing = fx(home.path())
+    let missing = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .args(["--agent", "repo", "view", "ai/nope"])
@@ -1609,7 +1609,7 @@ async fn repo_clone_really_clones_the_url_the_api_reported() {
 
     let workdir = home.path().join("work");
     std::fs::create_dir(&workdir).unwrap();
-    let mut cmd = fx(home.path());
+    let mut cmd = gf(home.path());
     cmd.current_dir(&workdir)
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
@@ -1653,7 +1653,7 @@ async fn repo_clone_takes_an_explicit_directory() {
 
     let workdir = home.path().join("work2");
     std::fs::create_dir(&workdir).unwrap();
-    let mut cmd = fx(home.path());
+    let mut cmd = gf(home.path());
     cmd.current_dir(&workdir)
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
@@ -1680,7 +1680,7 @@ async fn a_repository_with_no_clone_url_fails_before_running_git() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .args(["--agent", "repo", "clone", "ai/backend"])
@@ -1719,7 +1719,7 @@ async fn a_list_that_fits_in_one_page_is_not_marked_truncated() {
     mount_paged_pull_requests(&server, 12, 31).await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -1741,11 +1741,11 @@ async fn a_list_that_fits_in_one_page_is_not_marked_truncated() {
 #[tokio::test(flavor = "multi_thread")]
 async fn more_results_than_the_limit_are_reported_as_truncated() {
     let server = MockServer::start().await;
-    // 31 exist and 31 were asked for, which is how fx learns there are more.
+    // 31 exist and 31 were asked for, which is how gf learns there are more.
     mount_paged_pull_requests(&server, 31, 31).await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -1765,7 +1765,7 @@ async fn a_limit_beyond_one_page_walks_pages_and_returns_them_in_order() {
     mount_paged_pull_requests(&server, 250, 100).await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -1798,7 +1798,7 @@ async fn paging_stops_when_the_collection_runs_out() {
     mount_paged_pull_requests(&server, 150, 100).await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -1817,7 +1817,7 @@ async fn a_human_is_told_when_a_table_is_not_the_whole_story() {
     mount_paged_pull_requests(&server, 31, 31).await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -1849,7 +1849,7 @@ async fn a_transient_failure_is_retried_without_the_caller_seeing_it() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .args(["--agent", "api", "GET", "/api/v1/user"])
@@ -1876,7 +1876,7 @@ async fn retries_zero_surfaces_the_first_failure() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_RETRIES", "0")
@@ -1902,7 +1902,7 @@ async fn rate_limiting_has_its_own_code_and_reports_the_servers_delay() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_RETRIES", "0")
@@ -1921,7 +1921,7 @@ async fn rate_limiting_has_its_own_code_and_reports_the_servers_delay() {
 }
 
 // ---------------------------------------------------------------------------
-// fx pr diff / checks / checkout
+// gf pr diff / checks / checkout
 // ---------------------------------------------------------------------------
 
 const RAW_DIFF: &str = "diff --git a/src/main.rs b/src/main.rs\n@@ -1,2 +1,2 @@\n-old\n+new\n";
@@ -1960,7 +1960,7 @@ async fn pr_diff_asks_for_the_form_that_suits_the_output_mode() {
             .env("GITFOX_REPO", "ai/backend");
     };
 
-    let mut human = fx(home.path());
+    let mut human = gf(home.path());
     env(&mut human);
     let human = human.args(["pr", "diff", "12"]).output().unwrap();
     assert_eq!(
@@ -1973,7 +1973,7 @@ async fn pr_diff_asks_for_the_form_that_suits_the_output_mode() {
     assert!(text.starts_with("diff --git"), "{text}");
     assert!(text.contains("+new"), "{text}");
 
-    let mut machine = fx(home.path());
+    let mut machine = gf(home.path());
     env(&mut machine);
     let machine = machine
         .args(["--agent", "pr", "diff", "12"])
@@ -2005,7 +2005,7 @@ async fn pr_diff_name_only_leaves_the_patches_out() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -2041,7 +2041,7 @@ async fn pr_checks_separates_blocking_from_merely_failing() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let output = fx(home.path())
+    let output = gf(home.path())
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
         .env("GITFOX_REPO", "ai/backend")
@@ -2080,7 +2080,7 @@ async fn pr_checkout_fetches_the_branch_and_switches_to_it() {
     git(&source, &["commit", "-q", "-m", "feat: add OAuth"]);
     git(&source, &["checkout", "-q", "main"]);
 
-    // …and a clone of it, which is where fx runs.
+    // …and a clone of it, which is where gf runs.
     let work = home.path().join("work");
     let status = std::process::Command::new("git")
         .args([
@@ -2106,7 +2106,7 @@ async fn pr_checkout_fetches_the_branch_and_switches_to_it() {
         .mount(&server)
         .await;
 
-    let mut cmd = fx(home.path());
+    let mut cmd = gf(home.path());
     cmd.current_dir(&work)
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
@@ -2205,7 +2205,7 @@ async fn pr_checkout_fetches_a_forks_branch_from_the_fork() {
         .mount(&server)
         .await;
 
-    let output = fx(home.path())
+    let output = gf(home.path())
         .current_dir(&work)
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
@@ -2239,17 +2239,17 @@ fn a_reader_that_walks_away_is_not_a_failure() {
     use std::io::Read;
     use std::process::Stdio;
 
-    // `fx completion zsh` is ~90KB, comfortably past a 64KB pipe buffer, so the
+    // `gf completion zsh` is ~90KB, comfortably past a 64KB pipe buffer, so the
     // child is guaranteed to still be writing when the reader closes — exactly
     // what `| head -3` does. Rust ignores SIGPIPE, so without handling this the
     // write comes back as an error and the command reports failure (or, for
     // clap_complete, panics outright).
-    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("fx"))
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("gf"))
         .args(["completion", "zsh"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("fx should start");
+        .expect("gf should start");
 
     let mut stdout = child.stdout.take().unwrap();
     let mut head = [0u8; 64];
@@ -2259,7 +2259,7 @@ fn a_reader_that_walks_away_is_not_a_failure() {
 
     let output = child.wait_with_output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stderr.contains("panicked"), "fx panicked:\n{stderr}");
+    assert!(!stderr.contains("panicked"), "gf panicked:\n{stderr}");
     assert_eq!(output.status.code(), Some(0), "stderr:\n{stderr}");
 }
 
@@ -2278,7 +2278,7 @@ async fn a_closed_pipe_on_a_data_command_is_also_clean() {
         .await;
 
     let home = TempDir::new().unwrap();
-    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("fx"))
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("gf"))
         .args(["--agent", "pr", "list", "--limit", "100"])
         .env("GITFOX_HOST", server.uri())
         .env("GITFOX_TOKEN", "t")
@@ -2289,7 +2289,7 @@ async fn a_closed_pipe_on_a_data_command_is_also_clean() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("fx should start");
+        .expect("gf should start");
 
     let mut stdout = child.stdout.take().unwrap();
     let mut head = [0u8; 32];

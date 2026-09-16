@@ -1,6 +1,6 @@
 //! Rendering.
 //!
-//! Every byte `fx` writes to stdout goes through this module, which is what
+//! Every byte `gf` writes to stdout goes through this module, which is what
 //! makes "one command, two audiences" tractable: a command produces a value,
 //! and [`Renderer`] decides whether a human or a machine is reading it.
 //!
@@ -99,7 +99,7 @@ pub trait Render {
 
 /// A bare JSON value, rendered as pretty JSON for humans too.
 ///
-/// Used by `fx api`, where the whole point is to pass the server's answer
+/// Used by `gf api`, where the whole point is to pass the server's answer
 /// through untouched.
 pub struct Json(pub Value);
 
@@ -257,7 +257,7 @@ impl Renderer {
 
 /// Treat a closed reader as success.
 ///
-/// `fx pr list | head -5` closes the pipe as soon as head has what it wants.
+/// `gf pr list | head -5` closes the pipe as soon as head has what it wants.
 /// Rust ignores `SIGPIPE`, so the write comes back as `BrokenPipe` instead of
 /// killing the process the way every other Unix tool dies — and reporting it
 /// would turn an ordinary pipeline into a failed command. Restoring the signal
@@ -320,7 +320,7 @@ pub fn relative_time(epoch: i64) -> String {
     }
 }
 
-/// Aligned `key: value` lines, for single-record views like `fx auth status`.
+/// Aligned `key: value` lines, for single-record views like `gf auth status`.
 pub fn key_values(pairs: &[(&str, String)]) -> String {
     let width = pairs.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
     pairs
@@ -367,7 +367,7 @@ mod tests {
     fn error_envelope_shape_is_stable() {
         let err = CliError::config("no GitFox host configured")
             .with_details(json!({ "checked": ["--host", "GITFOX_HOST"] }))
-            .with_hint("run `fx auth login`");
+            .with_hint("run `gf auth login`");
         let envelope = json!({ "ok": false, "error": err.to_json() });
         assert_eq!(envelope["ok"], false);
         assert_eq!(envelope["error"]["code"], "CONFIG_ERROR");

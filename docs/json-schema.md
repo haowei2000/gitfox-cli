@@ -40,7 +40,7 @@ Given field names, `--json` prints what gh prints: the resource, or an array of
 them, restricted to those fields — **no envelope**:
 
 ```bash
-fx pr list --json number,title,headRefName
+gf pr list --json number,title,headRefName
 ```
 
 ```json
@@ -67,24 +67,24 @@ with gh. With `--output jsonl`, an array streams one object per line.
 * Errors still follow the resolved format: with `--agent` they are the error
   envelope on stdout; otherwise a message on stderr.
 
-Bare `--json` keeps its original meaning — `fx --json pr list` is the envelope —
+Bare `--json` keeps its original meaning — `gf --json pr list` is the envelope —
 and so does `--json` on a command without the table below: a word after it
-stays an argument, so `fx pipeline run --json default` runs `default`.
+stays an argument, so `gf pipeline run --json default` runs `default`.
 
 | Command | Fields |
 |---|---|
-| `fx pr list` / `view` | gh's pull request fields (`additions` … `url`) plus `description`, `is_draft`, `source_branch`, `target_branch`, `created`, `updated`, `merged`, `web_url`, `stats`, `merge_check_status`, `merge_conflicts`, `merge_method`, `source_sha`, `merger`, `check_summary` |
-| `fx pr status` | the pull request fields, as `{"currentBranch": …, "createdBy": […], "needsReview": […]}` |
-| `fx pr checks` | `bucket`, `completedAt`, `description`, `event`, `link`, `name`, `startedAt`, `state`, `workflow`, plus `status`, `required`, `summary` |
-| `fx repo list` / `view` | gh's repository fields (`archivedAt` … `watchers`) plus `repository`, `default_branch`, `is_public`, `is_empty`, `open_pull_requests`, `size_kib`, `git_url`, `git_ssh_url`, `created`, `updated` |
-| `fx repo read-file` | `content` (base64), `downloadUrl`, `encoding`, `gitSHA`, `gitUrl`, `htmlUrl`, `name`, `path`, `size`, `type`, `url` |
-| `fx repo read-dir` | `gitSHA`, `gitType`, `mode`, `modeOctal`, `name`, `nameRaw`, `path`, `pathRaw`, `size`, `submodule`, `type` |
-| `fx run list` / `view` | `attempt`, `conclusion`, `createdAt`, `databaseId`, `displayTitle`, `event`, `headBranch`, `headSha`, `jobs` (the stages, which `view` fills in), `name`, `number`, `startedAt`, `status`, `updatedAt`, `url`, `workflowDatabaseId`, `workflowName`, plus `pipeline`, `branch`, `message`, `author`, `commit`, `created`, `started`, `finished` |
-| `fx workflow list` | `id`, `name`, `path`, `state`, plus `identifier`, `description`, `disabled`, `config_path`, `default_branch`, `created`, `updated` |
-| `fx secret list` | `name`, `numSelectedRepos`, `selectedReposURL`, `updatedAt`, `visibility`, plus `identifier`, `description`, `created`, `updated` |
-| `fx label list` | `color` (hex), `createdAt`, `description`, `id`, `isDefault`, `name`, `updatedAt`, `url`, plus `key`, `type`, `scope`, `value_count` |
-| `fx codespace list` / `view` | `createdAt`, `displayName`, `gitStatus`, `lastUsedAt`, `machineName`, `name`, `owner`, `repository`, `state`, `vscsTarget`, plus `identifier`, `branch`, `ide`, `url`; `view` also takes gh's `billableOwner`, `devcontainerPath`, `environmentId`, `idleTimeoutMinutes`, `location`, `machineDisplayName`, `prebuild`, `recentFolders`, `retentionExpiresAt`, `retentionPeriodDays` |
-| `fx auth status` | `hosts` |
+| `gf pr list` / `view` | gh's pull request fields (`additions` … `url`) plus `description`, `is_draft`, `source_branch`, `target_branch`, `created`, `updated`, `merged`, `web_url`, `stats`, `merge_check_status`, `merge_conflicts`, `merge_method`, `source_sha`, `merger`, `check_summary` |
+| `gf pr status` | the pull request fields, as `{"currentBranch": …, "createdBy": […], "needsReview": […]}` |
+| `gf pr checks` | `bucket`, `completedAt`, `description`, `event`, `link`, `name`, `startedAt`, `state`, `workflow`, plus `status`, `required`, `summary` |
+| `gf repo list` / `view` | gh's repository fields (`archivedAt` … `watchers`) plus `repository`, `default_branch`, `is_public`, `is_empty`, `open_pull_requests`, `size_kib`, `git_url`, `git_ssh_url`, `created`, `updated` |
+| `gf repo read-file` | `content` (base64), `downloadUrl`, `encoding`, `gitSHA`, `gitUrl`, `htmlUrl`, `name`, `path`, `size`, `type`, `url` |
+| `gf repo read-dir` | `gitSHA`, `gitType`, `mode`, `modeOctal`, `name`, `nameRaw`, `path`, `pathRaw`, `size`, `submodule`, `type` |
+| `gf run list` / `view` | `attempt`, `conclusion`, `createdAt`, `databaseId`, `displayTitle`, `event`, `headBranch`, `headSha`, `jobs` (the stages, which `view` fills in), `name`, `number`, `startedAt`, `status`, `updatedAt`, `url`, `workflowDatabaseId`, `workflowName`, plus `pipeline`, `branch`, `message`, `author`, `commit`, `created`, `started`, `finished` |
+| `gf workflow list` | `id`, `name`, `path`, `state`, plus `identifier`, `description`, `disabled`, `config_path`, `default_branch`, `created`, `updated` |
+| `gf secret list` | `name`, `numSelectedRepos`, `selectedReposURL`, `updatedAt`, `visibility`, plus `identifier`, `description`, `created`, `updated` |
+| `gf label list` | `color` (hex), `createdAt`, `description`, `id`, `isDefault`, `name`, `updatedAt`, `url`, plus `key`, `type`, `scope`, `value_count` |
+| `gf codespace list` / `view` | `createdAt`, `displayName`, `gitStatus`, `lastUsedAt`, `machineName`, `name`, `owner`, `repository`, `state`, `vscsTarget`, plus `identifier`, `branch`, `ide`, `url`; `view` also takes gh's `billableOwner`, `devcontainerPath`, `environmentId`, `idleTimeoutMinutes`, `location`, `machineDisplayName`, `prebuild`, `recentFolders`, `retentionExpiresAt`, `retentionPeriodDays` |
+| `gf auth status` | `hosts` |
 
 A few gh vocabularies, mapped:
 
@@ -111,19 +111,19 @@ Every list command returns the same outer shape:
 | `truncated` | boolean | Whether the server had **more** than `--limit` allowed through |
 | `items` | array | The rows |
 
-`truncated` is observed, not guessed: fx asks for one more item than you
+`truncated` is observed, not guessed: gf asks for one more item than you
 requested, so receiving it is proof more exist. When it is `true`, raise
-`--limit` (fx pages transparently, at up to 100 rows per request). A filter the
-server cannot apply — `fx pr list --draft`, `fx run list --status` — reads pages
+`--limit` (gf pages transparently, at up to 100 rows per request). A filter the
+server cannot apply — `gf pr list --draft`, `gf run list --status` — reads pages
 until enough rows match, so `truncated` stays an observation.
 
-`fx pipeline list` without `--pipeline` pages over *pipelines*, each
+`gf pipeline list` without `--pipeline` pages over *pipelines*, each
 contributing its most recent run, so `count` can be lower than `--limit`
 without anything being hidden — a pipeline that has never run has no row.
 
 ## `data` by command
 
-### `fx repo list` / `fx repo view`
+### `gf repo list` / `gf repo view`
 
 `items[]`, and the whole of `data` for `view`:
 
@@ -145,13 +145,13 @@ without anything being hidden — a pipeline that has never run has no row.
 ```
 
 `visibility` and `is_public` are `null` when the endpoint did not report them —
-which is the case for the instance-wide `fx repo list`. Unknown, not private.
-`fx repo list <space>` and `fx repo view` always report it.
+which is the case for the instance-wide `gf repo list`. Unknown, not private.
+`gf repo list <space>` and `gf repo view` always report it.
 
-`fx repo list` also carries `space`, which is `null` when the listing spanned
+`gf repo list` also carries `space`, which is `null` when the listing spanned
 the whole instance.
 
-### `fx repo create` / `edit` / `rename` / `fork` / `delete`
+### `gf repo create` / `edit` / `rename` / `fork` / `delete`
 
 ```json
 {
@@ -167,7 +167,7 @@ action: `cloned_to` and `remote_added` (create, fork), `previous` and
 `remote_updated` (rename), `source` (fork), `deleted_at` (delete — GitFox
 deletes softly, and this is what a restore needs).
 
-### `fx repo sync` / `set-default`
+### `gf repo sync` / `set-default`
 
 ```json
 { "synced": "origin", "branch": "main", "detail": "…" }
@@ -176,7 +176,7 @@ deletes softly, and this is what a restore needs).
 
 `sync` with a repository argument syncs it on the server and `branch` is `null`.
 
-### `fx repo read-file` / `read-dir`
+### `gf repo read-file` / `read-dir`
 
 ```json
 { "path": "src/main.rs", "name": "main.rs", "ref": "main", "sha": "…",
@@ -190,11 +190,11 @@ and nothing else.
 
 `read-dir`: `{ "path", "ref", "count", "items": [ { "name", "path", "type", "sha" } ] }`.
 
-### `fx repo gitignore list` / `license list`
+### `gf repo gitignore list` / `license list`
 
 `{ "count", "items": [ { "key", "name" } ] }`.
 
-### `fx pr list` / `view` / `create` / `edit`
+### `gf pr list` / `view` / `create` / `edit`
 
 `items[]`, and the whole of `data` for `view`, `create` and `edit`:
 
@@ -225,13 +225,13 @@ and nothing else.
 `state` is `open`, `closed` or `merged`. A draft is `state: "open"` with
 `is_draft: true`; the human table shows it as `draft`.
 
-`fx pr list` also carries `repository`. `fx pr view --comments` adds
+`gf pr list` also carries `repository`. `gf pr view --comments` adds
 `comments: [ { "id", "author", "text", "created", "path" } ]`, `author` in the
-shape above and `path` set only for a code comment. `fx pr create --dry-run` creates nothing and answers
+shape above and `path` set only for a code comment. `gf pr create --dry-run` creates nothing and answers
 `{ "dry_run": true, "repository", "title", "description", "source_branch",
 "target_branch", "is_draft", "reviewers", "labels" }`.
 
-### `fx pr close` / `reopen` / `ready`
+### `gf pr close` / `reopen` / `ready`
 
 ```json
 { "number": 12, "title": "…", "state": "closed", "is_draft": false,
@@ -241,7 +241,7 @@ shape above and `path` set only for a code comment. `fx pr create --dry-run` cre
 `changed` is `false` when the pull request was already in that state — which is
 not an error, as with gh.
 
-### `fx pr comment` / `review` / `update-branch`
+### `gf pr comment` / `review` / `update-branch`
 
 ```json
 { "action": "added", "number": 12, "comment_id": 5, "text": "…", "web_url": "…" }
@@ -253,17 +253,17 @@ not an error, as with gh.
 `action` is `added`, `edited` or `deleted`. `decision` is GitFox's word:
 `approved`, `changereq` or `reviewed`.
 
-### `fx pr status`
+### `gf pr status`
 
 ```json
 { "repository": "ai/backend", "current_branch": { … } ,
   "created_by": [ { … } ], "needs_review": [ { … } ] }
 ```
 
-Each pull request has the `fx pr view` shape; `current_branch` is `null` off a
+Each pull request has the `gf pr view` shape; `current_branch` is `null` off a
 branch or without a pull request.
 
-### `fx pr merge`
+### `gf pr merge`
 
 ```json
 {
@@ -277,7 +277,7 @@ branch or without a pull request.
 
 With `--dry-run`, `merged` is `false` and `mergeable` answers the question.
 
-### `fx pr checkout` (and `fx co`)
+### `gf pr checkout` (and `gf co`)
 
 ```json
 { "number": 12, "title": "…", "branch": "feat/oauth", "remote": "origin",
@@ -287,7 +287,7 @@ With `--dry-run`, `merged` is `false` and `mergeable` answers the question.
 `branch` is `null` with `--detach`. For a pull request from a fork, `remote`
 names the fork's repository, which is where the branch was fetched from.
 
-### `fx pr diff`
+### `gf pr diff`
 
 ```json
 { "number": 12, "source_branch": "…", "target_branch": "…", "count": 1,
@@ -298,7 +298,7 @@ names the fork's repository, which is where the branch was fetched from.
 `--name-only` leaves `patch` null. `--patch` answers `{ "number", "patch" }`,
 the pull request as `git format-patch` mails.
 
-### `fx pr checks`
+### `gf pr checks`
 
 ```json
 { "number": 12, "commit_sha": "…", "count": 2, "failed": true, "blocking": 1,
@@ -309,7 +309,7 @@ the pull request as `git format-patch` mails.
 Exit 0 in every machine mode; see [exit-codes.md](exit-codes.md) for what a
 person gets.
 
-### `fx pipeline list` / `view` / `run` / `retry`, `fx run list` / `view` / `rerun` / `cancel`, `fx workflow run`
+### `gf pipeline list` / `view` / `run` / `retry`, `gf run list` / `view` / `rerun` / `cancel`, `gf workflow run`
 
 `items[]`, and the base of `data` for the others:
 
@@ -332,10 +332,10 @@ person gets.
 `blocked`, `declined`, `error`, `failure`, `killed`, `pending`, `running`,
 `skipped`, `success`, `waiting_on_dependencies` — **treat it as an open set**
 and match on the values you care about rather than assuming these are all of
-them. `error`, `failure` and `killed` are the ones fx treats as failed.
+them. `error`, `failure` and `killed` are the ones gf treats as failed.
 
-`fx pipeline view`, `fx run view` and `fx run watch` add `stages`; `fx run view`
-and `fx run watch` also add `url`, the run's page:
+`gf pipeline view`, `gf run view` and `gf run watch` add `stages`; `gf run view`
+and `gf run watch` also add `url`, the run's page:
 
 ```json
 { "stages": [ { "number": 1, "name": "build", "status": "failure", "error": null,
@@ -343,9 +343,9 @@ and `fx run watch` also add `url`, the run's page:
                "exit_code": 101, "error": null } ] } ] }
 ```
 
-`fx run delete` answers `{ "pipeline", "number", "deleted": true }`.
+`gf run delete` answers `{ "pipeline", "number", "deleted": true }`.
 
-### `fx pipeline logs`, `fx run view --log` / `--log-failed`
+### `gf pipeline logs`, `gf run view --log` / `--log-failed`
 
 ```json
 {
@@ -370,7 +370,7 @@ fetched still appears, with its status and exit code and an empty `lines`.
 A green run with `--failed` is **not** an error: `steps` is empty, `count` is
 `0`, and the exit code is `0`. Check `count`.
 
-### `fx workflow list` / `view` / `enable` / `disable`
+### `gf workflow list` / `view` / `enable` / `disable`
 
 `items[]` for `list` (beside `repository`, `count` and `truncated`), and the
 base of `view`:
@@ -384,7 +384,7 @@ base of `view`:
 `{ "pipeline", "path", "ref", "content" }` with the definition decoded.
 `enable`/`disable` answer `{ "identifier", "disabled", "changed" }`.
 
-### `fx secret list` / `set` / `delete`
+### `gf secret list` / `set` / `delete`
 
 ```json
 { "space": "ai", "count": 1, "truncated": false,
@@ -393,10 +393,10 @@ base of `view`:
 { "space": "ai", "name": "DEPLOY_TOKEN", "deleted": true }
 ```
 
-A secret's value appears nowhere, in any mode: GitFox never returns one and fx
+A secret's value appears nowhere, in any mode: GitFox never returns one and gf
 never echoes the one it sent. `action` is `created` or `updated`.
 
-### `fx label list` / `create` / `edit` / `delete` / `clone`
+### `gf label list` / `create` / `edit` / `delete` / `clone`
 
 ```json
 { "id": 3, "key": "bug", "description": "…", "color": "red", "type": "static",
@@ -411,7 +411,7 @@ or `space`. `delete`: `{ "repository", "name", "deleted": true }`; `clone`:
 `{ "source", "destination", "created", "updated", "skipped" }`, each of the last
 three a list of label names.
 
-### `fx ssh-key list` / `add` / `delete`
+### `gf ssh-key list` / `add` / `delete`
 
 ```json
 { "id": "laptop", "title": "laptop", "fingerprint": "SHA256:…", "type": "ssh-ed25519",
@@ -421,11 +421,11 @@ three a list of label names.
 `list` wraps these as `{ "count", "items" }`; `add` answers the one key;
 `delete` answers `{ "id", "deleted": true }`.
 
-### `fx org list`
+### `gf org list`
 
 `{ "count", "truncated", "items": [ { "space", "identifier", "description", "is_public", "role" } ] }`.
 
-### `fx ruleset list` / `view`
+### `gf ruleset list` / `view`
 
 ```json
 { "identifier": "CI_Check", "description": "", "type": "branch", "state": "disabled",
@@ -437,7 +437,7 @@ three a list of label names.
 these in `items`, beside `repository`, `count` and `truncated`; `view` adds
 `web_url`.
 
-### `fx codespace list` / `view` / `create` / `stop` / `delete` / `logs`
+### `gf codespace list` / `view` / `create` / `stop` / `delete` / `logs`
 
 ```json
 { "identifier": "backend-1757000000", "name": "backend", "state": "running",
@@ -450,7 +450,7 @@ add `action` (`created`, `stopped`); `delete` answers `{ "deleted": [ids] }`;
 `logs` answers `{ "identifier", "count", "lines" }`. On an instance with
 gitspaces switched off, every one of these fails with `UNSUPPORTED`.
 
-### `fx status`
+### `gf status`
 
 ```json
 { "space": "ai", "repositories_scanned": 3,
@@ -458,12 +458,12 @@ gitspaces switched off, every one of these fails with `UNSUPPORTED`.
   "pull_requests": [ … ] }
 ```
 
-### `fx browse`, and `--web` anywhere
+### `gf browse`, and `--web` anywhere
 
 `{ "url": "…", "opened": false }` — a machine gets the URL; a browser is only
 opened for a person.
 
-### `fx api`
+### `gf api`
 
 `data` is the endpoint's response body, untouched. With `--include` it becomes
 `{ "status": 200, "headers": { … }, "body": … }`. With `--paginate`, the pages'
@@ -478,7 +478,7 @@ server redirects fails with `API_ERROR`: `details.status` is the 3xx status and
 `message` names where the server pointed. Following it could resend the write
 as a `GET`, which changes nothing and still answers 200.
 
-### `fx auth status` / `token` / `switch` / `setup-git`
+### `gf auth status` / `token` / `switch` / `setup-git`
 
 ```json
 { "host": "…", "host_key": "git.example.com", "user": "Haowei", "login": "whw",
@@ -489,13 +489,13 @@ as a `GET`, which changes nothing and still answers 200.
 `token` is the literal `"configured"` — unless `--show-token` asked for the
 value. `token_source` is `flag`, `env` or `keyring`.
 
-`fx auth token` answers `{ "host_key", "token" }` (and prints only the token for
+`gf auth token` answers `{ "host_key", "token" }` (and prints only the token for
 a person). These two are the only places a token is ever output, because that
 is what they are for; see the README's security section.
 
 `switch`: `{ "default_host", "previous" }`. `setup-git`: `{ "configured": [origins] }`.
 
-### `fx alias`, `fx config`
+### `gf alias`, `gf config`
 
 `alias list`: `{ "count", "items": [ { "name", "expansion" } ] }`;
 `alias set`: `{ "name", "expansion", "replaced" }`; `alias delete`:

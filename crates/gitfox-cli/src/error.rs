@@ -31,12 +31,12 @@ pub enum ErrorCode {
     NotImplemented,
     /// A gh flag or command whose feature GitFox does not have.
     Unsupported,
-    /// `fx pr checks`: a check failed. Exit 1, as `gh pr checks` does.
+    /// `gf pr checks`: a check failed. Exit 1, as `gh pr checks` does.
     ChecksFailed,
-    /// `fx pr checks`: checks are still running. Exit 8, as `gh pr checks`
+    /// `gf pr checks`: checks are still running. Exit 8, as `gh pr checks`
     /// does.
     ChecksPending,
-    /// `fx run view|watch --exit-status`: the run did not succeed. Exit 1, as
+    /// `gf run view|watch --exit-status`: the run did not succeed. Exit 1, as
     /// gh does.
     RunFailed,
     /// A confirmation was declined.
@@ -177,7 +177,7 @@ impl From<gitfox_client::Error> for CliError {
         use gitfox_client::Error as E;
         match err {
             E::AuthRequired => CliError::new(ErrorCode::AuthRequired, err.to_string())
-                .with_hint("set GITFOX_TOKEN, pass --token, or run `fx auth login`"),
+                .with_hint("set GITFOX_TOKEN, pass --token, or run `gf auth login`"),
             E::AuthFailed => CliError::new(ErrorCode::AuthFailed, err.to_string())
                 .with_hint("the token may be expired or lack the required scope"),
             E::NotFound {
@@ -197,7 +197,7 @@ impl From<gitfox_client::Error> for CliError {
                 ref message,
             } => CliError::new(ErrorCode::RateLimited, format!("rate limited: {message}"))
                 .with_details(json!({ "retry_after_secs": retry_after }))
-                .with_hint("fx already retried; raise --retries or wait before trying again"),
+                .with_hint("gf already retried; raise --retries or wait before trying again"),
             E::Api {
                 status,
                 ref message,

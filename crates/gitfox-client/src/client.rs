@@ -39,7 +39,7 @@ pub const DEFAULT_RETRIES: u32 = 2;
 /// its own schedule.
 const MAX_BACKOFF: Duration = Duration::from_secs(5);
 
-const USER_AGENT: &str = concat!("fx/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: &str = concat!("gf/", env!("CARGO_PKG_VERSION"));
 
 /// A GitFox API client bound to one host.
 #[derive(Clone)]
@@ -126,7 +126,7 @@ impl GitFoxClient {
     /// Resolve an API path against the host.
     ///
     /// Accepts `/api/v1/user`, `api/v1/user` and a fully qualified URL, so
-    /// `fx api` can take whatever the user pasted.
+    /// `gf api` can take whatever the user pasted.
     pub fn resolve(&self, path: &str) -> Result<Url> {
         if path.starts_with("http://") || path.starts_with("https://") {
             return Url::parse(path).map_err(|e| Error::InvalidUrl(format!("{path}: {e}")));
@@ -404,7 +404,7 @@ impl GitFoxClient {
 }
 
 /// A response that succeeded at the HTTP level, kept in both raw and parsed form
-/// so `fx api` can pass anything through untouched.
+/// so `gf api` can pass anything through untouched.
 #[derive(Debug, Clone)]
 pub struct RawResponse {
     pub status: u16,

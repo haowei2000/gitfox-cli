@@ -223,7 +223,7 @@ pub async fn edit(args: PrEditArgs, ctx: &Context) -> Result<()> {
     if !args.attach.is_empty() {
         return Err(CliError::unsupported(
             "`--attach`",
-            "fx cannot upload attachments to a GitFox pull request",
+            "gf cannot upload attachments to a GitFox pull request",
         ));
     }
 
@@ -318,7 +318,7 @@ pub async fn comment(args: PrCommentArgs, ctx: &Context) -> Result<()> {
     if !args.attach.is_empty() {
         return Err(CliError::unsupported(
             "`--attach`",
-            "fx cannot upload attachments to a GitFox pull request",
+            "gf cannot upload attachments to a GitFox pull request",
         ));
     }
     let client = ctx.client()?;

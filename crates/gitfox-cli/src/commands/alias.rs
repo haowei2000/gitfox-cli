@@ -1,4 +1,4 @@
-//! `fx alias` — shortcuts, stored in the config file's `[aliases]` table and
+//! `gf alias` — shortcuts, stored in the config file's `[aliases]` table and
 //! expanded by [`crate::argv`] before anything is parsed.
 
 use clap::CommandFactory;
@@ -30,13 +30,13 @@ fn check_name(name: &str) -> Result<()> {
     }
     if Cli::command().find_subcommand(name).is_some() {
         return Err(CliError::invalid_argument(format!(
-            "could not create alias: \"{name}\" is already an fx command"
+            "could not create alias: \"{name}\" is already an gf command"
         )));
     }
     Ok(())
 }
 
-/// A non-shell expansion has to start with something fx can run.
+/// A non-shell expansion has to start with something gf can run.
 fn check_expansion(expansion: &str, shell: bool) -> Result<String> {
     if shell || expansion.starts_with('!') {
         return Ok(if expansion.starts_with('!') {
@@ -51,7 +51,7 @@ fn check_expansion(expansion: &str, shell: bool) -> Result<String> {
         .unwrap_or_default();
     if Cli::command().find_subcommand(&first).is_none() {
         return Err(CliError::invalid_argument(format!(
-            "could not create alias: {expansion} does not correspond to an fx command"
+            "could not create alias: {expansion} does not correspond to an gf command"
         ))
         .with_hint("start the expansion with a command, e.g. `pr list`, or pass --shell"));
     }
@@ -224,7 +224,7 @@ impl Render for AliasList {
         if self.0.is_empty() {
             return "no aliases configured".to_string();
         }
-        // The same YAML `fx alias import` reads back.
+        // The same YAML `gf alias import` reads back.
         self.0
             .iter()
             .map(|(name, expansion)| format!("{name}: {}", yaml_value(expansion)))
@@ -291,12 +291,12 @@ mod tests {
     }
 
     #[test]
-    fn an_expansion_must_run_an_fx_command_unless_it_is_a_shell_alias() {
+    fn an_expansion_must_run_an_gf_command_unless_it_is_a_shell_alias() {
         assert_eq!(check_expansion("pr list", false).unwrap(), "pr list");
         assert!(check_expansion("rm -rf /", false).is_err());
         assert_eq!(
-            check_expansion("fx pr list | head", true).unwrap(),
-            "!fx pr list | head"
+            check_expansion("gf pr list | head", true).unwrap(),
+            "!gf pr list | head"
         );
         assert_eq!(check_expansion("!echo hi", false).unwrap(), "!echo hi");
     }
@@ -304,7 +304,7 @@ mod tests {
     #[test]
     fn the_yaml_gh_prints_is_the_yaml_import_reads() {
         let entries = parse_yaml_map(
-            "# aliases\nco: pr checkout\nprs: 'pr list --json number,title'\nmine: \"!fx pr list | head\"\n",
+            "# aliases\nco: pr checkout\nprs: 'pr list --json number,title'\nmine: \"!gf pr list | head\"\n",
         )
         .unwrap();
         assert_eq!(
@@ -312,12 +312,12 @@ mod tests {
             vec![
                 ("co".to_string(), "pr checkout".to_string()),
                 ("prs".to_string(), "pr list --json number,title".to_string()),
-                ("mine".to_string(), "!fx pr list | head".to_string()),
+                ("mine".to_string(), "!gf pr list | head".to_string()),
             ]
         );
         assert!(parse_yaml_map("not yaml at all").is_err());
         assert_eq!(yaml_value("pr list"), "pr list");
-        assert_eq!(yaml_value("!fx x | y"), "'!fx x | y'");
+        assert_eq!(yaml_value("!gf x | y"), "'!gf x | y'");
         // What list prints, import reads back unchanged.
         let round = parse_yaml_map(&format!("a: {}", yaml_value("it's: odd"))).unwrap();
         assert_eq!(round[0].1, "it's: odd");

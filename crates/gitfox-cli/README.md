@@ -1,16 +1,18 @@
-# gitfox-cli — `fx`
+# gitfox-cli — `gf`
 
 A [GitFox](https://github.com/harness/gitness) client for humans, CI and AI
-agents. Installs a single binary called `fx`.
+agents. Installs a single binary called `gf` — named `fx` up to 0.6; upgrading
+keeps your login, config and per-checkout default, and only needs `gf auth
+setup-git` re-run.
 
 ```bash
 cargo install gitfox-cli
 ```
 
 ```bash
-fx pr list                                    # you
-GITFOX_TOKEN=$TOKEN fx --agent pipeline list  # CI
-fx --agent pr list                            # an agent
+gf pr list                                    # you
+GITFOX_TOKEN=$TOKEN gf --agent pipeline list  # CI
+gf --agent pr list                            # an agent
 ```
 
 `--agent` is shorthand for `--output json --non-interactive --no-color`. In that
@@ -26,29 +28,29 @@ nothing has to be parsed out of prose:
 ```bash
 export GITFOX_HOST=https://git.example.com
 export GITFOX_TOKEN=xxxxxxxx
-fx api GET /api/v1/user
+gf api GET /api/v1/user
 ```
 
 Or log in interactively and let the token live in the OS keychain:
 
 ```bash
-fx auth login --hostname git.example.com
+gf auth login --hostname git.example.com
 ```
 
 Inside a checkout, nothing needs spelling out — the repository comes from the
 git remote and the pull request from the branch you are on:
 
 ```bash
-fx pr list
-fx pr view
-fx pr create --fill
-fx pipeline logs --failed --tail 50
+gf pr list
+gf pr view
+gf pr create --fill
+gf pipeline logs --failed --tail 50
 ```
 
 ## Coming from gh
 
-fx takes gh's commands, flags and exit codes: `fx pr checks && ./deploy.sh`,
-`fx run view --log-failed`, `fx pr list --json number,title --jq '.[].title'`.
+gf takes gh's commands, flags and exit codes: `gf pr checks && ./deploy.sh`,
+`gf run view --log-failed`, `gf pr list --json number,title --jq '.[].title'`.
 A gh command for something GitFox does not have — issues, releases, gists —
 answers exit 9 with the reason rather than failing to parse.
 
@@ -57,8 +59,8 @@ answers exit 9 with the reason rather than failing to parse.
 * One JSON envelope and one error-code table, both documented and stable.
 * Lists report `truncated`, observed rather than guessed, so "did I see
   everything" always has an answer.
-* `fx api` reaches any endpoint, so a missing command never blocks anything.
-* `fx pipeline logs --failed` turns "why is CI red" from several requests and a
+* `gf api` reaches any endpoint, so a missing command never blocks anything.
+* `gf pipeline logs --failed` turns "why is CI red" from several requests and a
   wall of output into one command.
 
 ## Documentation

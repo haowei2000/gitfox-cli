@@ -1,4 +1,4 @@
-//! `fx codespace` — gitspaces, GitFox's cloud development environments,
+//! `gf codespace` — gitspaces, GitFox's cloud development environments,
 //! under gh's `codespace` commands.
 //!
 //! Gitspaces are an instance feature. One with them switched off answers every
@@ -36,7 +36,7 @@ pub async fn run(cmd: CodespaceCommand, ctx: &Context) -> Result<()> {
         | CodespaceSubcommand::Rebuild(_)
         | CodespaceSubcommand::Ssh(_) => super::gh_only::refuse(
             "codespace",
-            "fx manages gitspaces but cannot connect to one; open it from the GitFox web UI",
+            "gf manages gitspaces but cannot connect to one; open it from the GitFox web UI",
         ),
     }
 }
@@ -95,7 +95,7 @@ async fn list(args: CodespaceListArgs, ctx: &Context) -> Result<()> {
     if args.web {
         return Err(CliError::unsupported(
             "`--web`",
-            "fx does not know where this instance serves its gitspaces page",
+            "gf does not know where this instance serves its gitspaces page",
         ));
     }
     let client = enabled_client(ctx).await?;
@@ -274,7 +274,7 @@ const GITSPACE_FIELDS: &[&str] = &[
     "repository",
     "state",
     "vscsTarget",
-    // fx's own names
+    // gf's own names
     "identifier",
     "branch",
     "ide",
@@ -304,7 +304,7 @@ const GITSPACE_VIEW_FIELDS: &[&str] = &[
     "retentionPeriodDays",
     "state",
     "vscsTarget",
-    // fx's own names
+    // gf's own names
     "identifier",
     "branch",
     "ide",
@@ -561,7 +561,7 @@ mod tests {
         .unwrap();
         for field in GITSPACE_VIEW_FIELDS {
             let value = gitspace_field(&g, field);
-            // Only the fx names without data may be null; a gh field never is.
+            // Only the gf names without data may be null; a gh field never is.
             if !["branch", "ide", "url"].contains(field) {
                 assert!(!value.is_null(), "{field} exported null");
             }

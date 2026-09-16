@@ -1,16 +1,16 @@
 //! gh-style structured output: `--json FIELDS`, `--jq` and `--template`.
 //!
-//! `fx --json` on its own keeps its meaning — the `{"ok":…}` envelope. Given
+//! `gf --json` on its own keeps its meaning — the `{"ok":…}` envelope. Given
 //! field names it switches to the shape gh prints: the resource, or an array of
 //! them, restricted to those fields and without an envelope. That is what a
 //! script or an agent that learned gh reaches for, so it has to work verbatim:
 //!
 //! ```text
-//! fx pr list --json number,title --jq '.[] | "\(.number) \(.title)"'
+//! gf pr list --json number,title --jq '.[] | "\(.number) \(.title)"'
 //! ```
 //!
 //! Field names are gh's (`headRefName`, `createdAt`, …) with gh's value shapes
-//! — uppercase states, ISO 8601 times, `{"login": …}` authors — plus fx's own
+//! — uppercase states, ISO 8601 times, `{"login": …}` authors — plus gf's own
 //! snake_case names, so the envelope's keys work too.
 
 use std::cell::RefCell;
